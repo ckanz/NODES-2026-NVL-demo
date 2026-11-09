@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "skills": {
+    "ndl-react": {
+      "source": "@neo4j-ndl/react",
+      "sourceType": "node_modules",
+      "skillPath": "skills/ndl-react/SKILL.md",
+      "version": "5.2.0",
+      "computedHash": "90765d51b9856d2927fcc46c478f0c132ae44259e54bf9f16af1da2e14a84021"
+    },
+    "neo4j-nvl-skill": {
+      "source": "@neo4j-nvl/base",
+      "sourceType": "node_modules",
+      "skillPath": "skills/neo4j-nvl-skill/SKILL.md",
+      "version": "2.0.0-3b74980d",
+      "computedHash": "a42707f170b4e022a8481787a81a0ec5f1f85c6d181e6738a5a6f8981744ce6c"
+    }
+  }
+}

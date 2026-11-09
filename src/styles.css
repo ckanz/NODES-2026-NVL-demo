@@ -1,0 +1,403 @@
+.app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  overflow: hidden;
+  background: var(--theme-color-neutral-bg-default);
+  color: var(--theme-color-neutral-text-default);
+}
+
+/* Two equal halves: schema on the left, data on the right */
+.pane {
+  position: relative;
+  flex: 0 0 50%;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.pane-right {
+  border-left: 1px solid var(--theme-color-neutral-border-weak);
+}
+
+/* Each graph fills its pane. NVL needs an explicit width and height. */
+.graph-fullscreen {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* Own stacking context, so the scribble grid (z-index -1) sits behind NVL's canvas but inside the pane */
+  isolation: isolate;
+}
+
+/* Floating Needle-styled panels over the graph */
+.panel {
+  position: absolute;
+  z-index: 1;
+  background: var(--theme-color-neutral-bg-weak);
+  border: 1px solid var(--theme-color-neutral-border-weak);
+  box-shadow: var(--theme-shadow-raised);
+  box-sizing: border-box;
+}
+
+.panel-title {
+  top: var(--space-16);
+  left: var(--space-16);
+}
+
+/* Leave room for the Clear button; long status text wraps instead of running under it */
+.pane-right .panel-title {
+  max-width: calc(100% - 2 * var(--space-16) - 120px);
+  box-sizing: border-box;
+}
+
+/* Top-right actions on the data pane, above the loading overlay */
+.panel-actions {
+  display: flex;
+  gap: var(--space-8);
+  position: absolute;
+  z-index: 2;
+  top: var(--space-16);
+  right: var(--space-16);
+}
+
+.panel-error {
+  position: absolute;
+  z-index: 2;
+  top: var(--space-16);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 2 * var(--space-16)));
+}
+
+.panel-minimap {
+  right: var(--space-16);
+  bottom: var(--space-16);
+  overflow: hidden;
+}
+
+.minimap-container {
+  width: 240px;
+  height: 160px;
+}
+
+/* Centered hint shown while nothing is selected */
+.empty-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  text-align: center;
+  padding: var(--space-48);
+}
+
+/*
+ * Overlay content that NVL places over schema nodes.
+ * NVL lays each overlay out in a box (node: its diameter, relationship: along the edge) and scales the
+ * whole box with the zoom, so sizes here are in graph units, not screen pixels: they look small when
+ * the graph is zoomed out and grow as you zoom in.
+ */
+.app {
+  /* Bright red for the share-on-screen arc. Needle's own danger color is a dark orange-red,
+     too quiet for this, so this is a deliberate exception to using only theme tokens. */
+  --stat-accent: #ff1a2e;
+  --stat-halo: var(--theme-color-neutral-bg-weak);
+}
+
+.stat-overlay-host {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.stat-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* Text sits over nodes, edges and neighbours, so give it a soft halo instead of a box */
+.stat-title,
+.stat-line {
+  color: var(--theme-color-neutral-text-default);
+  text-shadow:
+    0 0 2px var(--stat-halo),
+    0 0 4px var(--stat-halo),
+    0 0 8px var(--stat-halo),
+    0 0 12px var(--stat-halo);
+}
+
+/* ---- node ---- */
+.stat-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.stat-ring-track {
+  fill: none;
+  stroke: var(--theme-color-neutral-border-strong);
+  opacity: 0.35;
+}
+
+.stat-ring-arc {
+  fill: none;
+  stroke: var(--stat-accent);
+}
+
+/* Loaded but not all on screen: the slice is drawn faintly, the visible part solid on top. */
+.stat-ring-arc-loaded {
+  opacity: 0.35;
+}
+
+/* The ring is draggable once the label is loaded. Only these shapes take pointer events. */
+.stat-ring-hit {
+  fill: none;
+  stroke: transparent;
+  pointer-events: stroke;
+  cursor: grab;
+  touch-action: none;
+}
+
+.stat-handle {
+  fill: var(--theme-color-neutral-bg-weak);
+  stroke: var(--stat-accent);
+  stroke-width: 5;
+  pointer-events: none;
+}
+
+.stat-handle-hit {
+  fill: transparent;
+  pointer-events: all;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+/* Centered on the node and free to spill over its edge */
+.stat-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.stat-node .stat-title {
+  font-size: 40px;
+  line-height: 1.1;
+  font-weight: 700;
+}
+
+.stat-node .stat-line {
+  font-size: 26px;
+  line-height: 1.15;
+  font-weight: 500;
+}
+
+/* Loading state over the data graph. Panels (z-index 1) and the minimap stay above it. */
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.loading-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--theme-color-neutral-bg-default);
+  opacity: 0.6;
+}
+
+.loading-content {
+  position: relative;
+  padding: var(--space-16) var(--space-24);
+  border-radius: var(--border-radius-xl);
+  background: var(--theme-color-neutral-bg-weak);
+  border: 1px solid var(--theme-color-neutral-border-weak);
+  box-shadow: var(--theme-shadow-raised);
+}
+
+/* ---- History: snapshots as a 3D stack receding into the screen, filling the data pane ---- */
+.time-machine {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: var(--theme-color-neutral-bg-default);
+  overflow: hidden;
+  outline: none;
+}
+
+/* Floats over the stack, with no bar of its own, so the cards can fill the pane */
+.time-machine-header {
+  position: absolute;
+  top: var(--space-12);
+  left: var(--space-16);
+  right: var(--space-16);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.time-machine-hint {
+  flex: 1;
+  min-width: 0;
+  margin-left: var(--space-8);
+}
+
+/* The cards live in 3D: perspective makes the ones further back smaller, and the vanishing point sits high
+   so the older ones climb up and away. */
+.time-machine-stage {
+  position: absolute;
+  inset: 0;
+  perspective: 1600px;
+  perspective-origin: 50% 8%;
+}
+
+/* The front card fills most of the pane, leaving a band at the top where the older cards peek out as tabs */
+.time-machine-card {
+  all: unset;
+  box-sizing: border-box;
+  position: absolute;
+  inset: 18% 5% 3%;
+  border-radius: var(--border-radius-xl);
+  background: var(--theme-color-neutral-bg-default);
+  border: 1px solid var(--theme-color-neutral-border-weak);
+  box-shadow: var(--theme-shadow-overlay);
+  cursor: pointer;
+  transform-origin: 50% 100%;
+  transition:
+    transform 380ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 260ms ease;
+}
+
+.time-machine-card-active {
+  border-color: var(--theme-color-primary-border-strong);
+}
+
+.time-machine-card:focus-visible {
+  outline: 2px solid var(--theme-color-primary-border-strong);
+}
+
+/* The picture is the whole pane as it was, drawn on the page background, so it blends into the card */
+.time-machine-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: inherit;
+  background: var(--theme-color-neutral-bg-default);
+  user-select: none;
+}
+
+/* The pane's title panel, replicated on each card. It is only a picture of the panel. */
+.time-machine-card .panel-title {
+  pointer-events: none;
+}
+
+/* A tab hanging above the card. It is what shows of the cards further back. */
+.time-machine-tab {
+  position: absolute;
+  bottom: 100%;
+  left: var(--space-16);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  max-width: calc(100% - 2 * var(--space-16));
+  padding: var(--space-4) var(--space-12);
+  border: 1px solid var(--theme-color-neutral-border-weak);
+  border-bottom: none;
+  border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0;
+  background: var(--theme-color-neutral-bg-weak);
+}
+
+.time-machine-card-active .time-machine-tab {
+  border-color: var(--theme-color-primary-border-strong);
+}
+
+.time-machine-reason {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Scribbles drawn over the graph. Drawn by hand on this canvas; the mouse passes straight through it. */
+.scribble-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  color: var(--stat-accent);
+}
+
+/*
+ * Graph paper behind the data graph while scribbling. NVL draws on a transparent canvas, so it shows through.
+ * Two layers of lines: strong ones every few cells, then weak ones every cell. GraphPane sets the size and
+ * position as the view moves; layer order here must match the backgroundSize it sets (major, major, minor, minor).
+ */
+.scribble-grid {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  --grid-minor: color-mix(
+    in srgb,
+    var(--theme-color-neutral-border-weak) 70%,
+    transparent
+  );
+  --grid-major: var(--theme-color-neutral-border-strong);
+  background-image:
+    linear-gradient(to right, var(--grid-major) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-major) 1px, transparent 1px),
+    linear-gradient(to right, var(--grid-minor) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-minor) 1px, transparent 1px);
+  opacity: 0.6;
+}
+
+/* What scribble mode does, along the bottom of the data pane. It ignores the mouse so drawing can go under it. */
+.scribble-hint {
+  position: absolute;
+  z-index: 2;
+  bottom: var(--space-16);
+  /* Centred in the room left of the minimap (240px plus its padding and border), at most 560px wide */
+  left: var(--space-16);
+  right: calc(246px + 2 * var(--space-16));
+  max-width: 560px;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-12) var(--space-16);
+  border-radius: var(--border-radius-xl);
+  background: var(--theme-color-neutral-bg-weak);
+  border: 1px solid var(--theme-color-neutral-border-weak);
+  box-shadow: var(--theme-shadow-raised);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+/* Shown by ErrorBoundary when rendering failed. */
+.fatal-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  max-width: 640px;
+  margin: 64px auto;
+  padding: 0 16px;
+}

@@ -1,5 +1,5 @@
 import { Typography } from "@neo4j-ndl/react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent, SVGProps } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import type { Slice } from "../data/neo4j";
@@ -7,25 +7,18 @@ import { formatCount, formatPercent, fractionOf } from "../utils/format";
 
 type StatOverlayProps = {
   title: string;
-  /** How many of these are in the data graph right now. */
   inScene: number;
-  /** How many exist in the whole database. */
+  /** Count in the whole database. */
   total: number;
-  /** How many of those have at least one relationship: the nodes the ring slices over. */
+  /** Nodes with at least one relationship: what the ring slices over. */
   sliceTotal: number;
-  /** The node's `size` (its radius), so the ring can sit just outside its edge. */
+  /** The node's radius. */
   nodeSize: number;
-  /** Whether this label's nodes are loaded. Only then is the ring a control; otherwise it just shows the share on screen. */
+  /** Only when loaded is the ring a control; otherwise it shows the share on screen. */
   selected: boolean;
-  /** Which nodes of this label are loaded. */
   slice: Slice;
-  /**
-   * How many of the loaded slice's nodes are on screen. Loaded nodes can be hidden (their label, or a second
-   * label of theirs, was removed, or they were dismissed), so the slice alone would overstate what is shown.
-   * Leave out when the label has no slice of its own.
-   */
+  /** Nodes of the slice actually on screen. */
   visibleInSlice?: number;
-  /** The most nodes the arc may cover. */
   maxCount: number;
   /** Called once, when a drag is released with a different slice. */
   onSliceChange: (slice: Slice) => void;
@@ -33,31 +26,54 @@ type StatOverlayProps = {
 
 type DragMode = "shift" | "start" | "end";
 
-/** Anything above zero gets at least a sliver, so a tiny share does not look the same as none. */
-const MIN_VISIBLE_FRACTION = 0.015;
-const visibleFraction = (fraction: number) =>
-  fraction > 0 ? Math.max(fraction, MIN_VISIBLE_FRACTION) : 0;
+// Graph units: NVL scales the overlay with the zoom.
+const RING_GAP = 12;
+const RING_WIDTH = 12;
+const HANDLE_RADIUS = 12;
+const HIT_WIDTH = 44;
+const HANDLE_HIT_RADIUS = 30;
+
+// So a tiny share does not look the same as none.
+const atLeastASliver = (fraction: number) =>
+  fraction > 0 ? Math.max(fraction, 0.015) : 0;
 
 const clamp = (value: number, low: number, high: number) =>
   Math.min(high, Math.max(low, value));
 
-// NVL lays the overlay out in a box the size of the node (diameter 2 * size) and scales that box with the
-// zoom, so these numbers are in graph units: they scale with the graph.
-const RING_GAP = 12;
-const RING_WIDTH = 12;
-const HANDLE_RADIUS = 12;
-const HANDLE_HIT_RADIUS = 30;
-const MIN_HANDLE_HIT_RADIUS = 10;
-// Each end may grab at most this share of the arc, so the middle half is always free to shift it.
-const HANDLE_HIT_ARC_SHARE = 0.25;
-const BODY_HIT_WIDTH = 44;
+/**
+ * `travelled` is a fraction of the circle, positive is clockwise. The result covers 1 to `maxCount` nodes and
+ * never runs past the last node.
+ */
+export const moveSlice = (
+  mode: DragMode,
+  from: Slice,
+  travelled: number,
+  total: number,
+  maxCount: number,
+): Slice => {
+  const delta = Math.round(travelled * total);
+  const end = from.skip + from.count;
+  if (mode === "shift") {
+    return {
+      skip: clamp(from.skip + delta, 0, total - from.count),
+      count: from.count,
+    };
+  }
+  if (mode === "start") {
+    const skip = clamp(from.skip + delta, Math.max(0, end - maxCount), end - 1);
+    return { skip, count: end - skip };
+  }
+  const newEnd = clamp(
+    end + delta,
+    from.skip + 1,
+    Math.min(total, from.skip + maxCount),
+  );
+  return { skip: from.skip, count: newEnd - from.skip };
+};
 
 /**
- * Content of a node's NVL `html` overlay: its label, how much of it is on screen, and a ring around it.
- *
- * Once the label is loaded the ring is a circular range control over that label's nodes: the full circle is
- * all of them, the red arc is the slice that is shown. Drag the arc to shift the slice, or drag either end
- * to make it smaller or larger. The new slice is reported when the drag is released.
+ * A schema node's NVL `html` overlay. Once loaded, the ring is a range control: drag the arc to shift the slice,
+ * or an end to resize it.
  */
 export const StatOverlay = ({
   title,
@@ -75,121 +91,82 @@ export const StatOverlay = ({
   const [dragSlice, setDragSlice] = useState<Slice | null>(null);
   const onSliceChangeRef = useRef(onSliceChange);
   onSliceChangeRef.current = onSliceChange;
-  /** Detaches the window listeners of a drag in progress. */
+  // Also run on unmount, so no window listener is left behind.
   const stopDragRef = useRef<(() => void) | null>(null);
-  // Unmounting mid-drag (a restore, a cleared graph) must not leave listeners behind that report a slice later.
   useEffect(() => () => stopDragRef.current?.(), []);
 
   const interactive = selected && sliceTotal > 0;
-  const shownSlice = dragSlice ?? slice;
-
-  // Where the arc starts (0 to 1 around the circle, from 12 o'clock) and how long it is.
-  const arcStart = interactive ? shownSlice.skip / sliceTotal : 0;
+  const shown = dragSlice ?? slice;
+  // Fractions of the circle, from 12 o'clock.
+  const arcStart = interactive ? shown.skip / sliceTotal : 0;
   const arcLength = interactive
-    ? Math.max(shownSlice.count / sliceTotal, MIN_VISIBLE_FRACTION)
-    : visibleFraction(fractionOf(inScene, total));
-
-  // Of the slice, the part that is on screen. The slice itself is drawn faintly behind it as the control, so
-  // a slice whose nodes are hidden looks loaded but not shown. While dragging, the new slice is drawn in full.
-  const showVisiblePart =
+    ? atLeastASliver(shown.count / sliceTotal)
+    : atLeastASliver(fractionOf(inScene, total));
+  // Then the slice is drawn faintly, with the part on screen solid over it.
+  const partlyHidden =
     interactive &&
     !dragSlice &&
     visibleInSlice !== undefined &&
-    visibleInSlice < shownSlice.count;
-  const visibleLength = showVisiblePart
-    ? visibleFraction((visibleInSlice ?? 0) / sliceTotal)
-    : 0;
+    visibleInSlice < shown.count;
 
-  const box = nodeSize * 2;
   const center = nodeSize;
   const radius = nodeSize + RING_GAP;
   const circumference = 2 * Math.PI * radius;
-  const dash = `${circumference * arcLength} ${circumference}`;
-  const rotation = `rotate(${-90 + 360 * arcStart} ${center} ${center})`;
-
   const pointAt = (fraction: number) => {
     const angle = 2 * Math.PI * fraction - Math.PI / 2;
     return {
-      x: center + radius * Math.cos(angle),
-      y: center + radius * Math.sin(angle),
+      cx: center + radius * Math.cos(angle),
+      cy: center + radius * Math.sin(angle),
     };
   };
 
-  /** Pointer position as a fraction around the circle, 0 at 12 o'clock and increasing clockwise. */
-  const fractionAround = (event: {
+  // From the arc's start; `length` 1 is the full ring.
+  const arc = (length: number, props: SVGProps<SVGCircleElement>) => (
+    <circle
+      cx={center}
+      cy={center}
+      r={radius}
+      strokeWidth={RING_WIDTH}
+      strokeDasharray={
+        length < 1 ? `${circumference * length} ${circumference}` : undefined
+      }
+      transform={`rotate(${-90 + 360 * arcStart} ${center} ${center})`}
+      {...props}
+    />
+  );
+
+  // 0 at 12 o'clock, increasing clockwise.
+  const fractionAround = ({
+    clientX,
+    clientY,
+  }: {
     clientX: number;
     clientY: number;
-  }): number => {
-    const rect = rootRef.current?.getBoundingClientRect();
-    if (!rect) return 0;
+  }) => {
+    const rect = rootRef.current!.getBoundingClientRect();
     const angle = Math.atan2(
-      event.clientY - (rect.top + rect.height / 2),
-      event.clientX - (rect.left + rect.width / 2),
+      clientY - rect.top - rect.height / 2,
+      clientX - rect.left - rect.width / 2,
     );
-    return ((((angle + Math.PI / 2) / (2 * Math.PI)) % 1) + 1) % 1;
+    return (((angle / (2 * Math.PI) + 0.25) % 1) + 1) % 1;
   };
 
   const beginDrag = (mode: DragMode) => (event: ReactPointerEvent) => {
     // Keep NVL out of it: no panning, no click on the node underneath.
     event.stopPropagation();
     event.preventDefault();
-    if (!interactive) return;
-
-    const origin = {
-      start: slice.skip / sliceTotal,
-      end: (slice.skip + slice.count) / sliceTotal,
-    };
-    const minLength = 1 / sliceTotal;
-    const maxLength = Math.min(1, maxCount / sliceTotal);
     let last = fractionAround(event);
     let travelled = 0;
-    let current: Slice = slice;
+    let current = slice;
 
     const onMove = (move: PointerEvent) => {
-      // Track movement as a signed distance around the circle so crossing 12 o'clock does not jump.
+      // Sum small steps, so crossing 12 o'clock does not jump a full turn.
       const here = fractionAround(move);
-      let step = here - last;
-      if (step > 0.5) step -= 1;
-      if (step < -0.5) step += 1;
-      travelled += step;
+      travelled += ((here - last + 1.5) % 1) - 0.5;
       last = here;
-
-      let start: number;
-      let end: number;
-      if (mode === "shift") {
-        const length = origin.end - origin.start;
-        start = clamp(origin.start + travelled, 0, 1 - length);
-        end = start + length;
-      } else if (mode === "start") {
-        end = origin.end;
-        start = clamp(
-          origin.start + travelled,
-          Math.max(0, end - maxLength),
-          end - minLength,
-        );
-      } else {
-        start = origin.start;
-        end = clamp(
-          origin.end + travelled,
-          start + minLength,
-          Math.min(1, start + maxLength),
-        );
-      }
-
-      const skip = Math.round(start * sliceTotal);
-      const count = clamp(
-        Math.round(end * sliceTotal) - skip,
-        1,
-        Math.min(maxCount, sliceTotal - skip),
-      );
-      // Whatever the pointer does, a slice never covers more than maxCount nodes or runs past the last one.
-      current = {
-        skip: Math.min(skip, sliceTotal - 1),
-        count: Math.min(count, maxCount),
-      };
+      current = moveSlice(mode, slice, travelled, sliceTotal, maxCount);
       setDragSlice(current);
     };
-
     const stop = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
@@ -210,100 +187,59 @@ export const StatOverlay = ({
     window.addEventListener("pointercancel", onUp);
   };
 
-  // NVL listens for these on its container. Anything that starts on the ring must not reach it.
-  const keepFromNvl = {
+  // NVL also listens for mouse down and click, which must not reach it.
+  const dragWith = (mode: DragMode) => ({
+    onPointerDown: beginDrag(mode),
     onMouseDown: (e: { stopPropagation: () => void }) => e.stopPropagation(),
     onClick: (e: { stopPropagation: () => void }) => e.stopPropagation(),
-  };
-
+  });
+  // At most a quarter of the arc each, so the middle stays free for shifting.
   const handleHitRadius = clamp(
-    circumference * arcLength * HANDLE_HIT_ARC_SHARE,
-    MIN_HANDLE_HIT_RADIUS,
+    circumference * arcLength * 0.25,
+    10,
     HANDLE_HIT_RADIUS,
   );
-  const startPoint = pointAt(arcStart);
-  const endPoint = pointAt(arcStart + arcLength);
+  const start = pointAt(arcStart);
+  const end = pointAt(arcStart + arcLength);
 
   return (
     <div ref={rootRef} className="stat-overlay stat-node">
-      <svg className="stat-ring" viewBox={`0 0 ${box} ${box}`}>
-        <circle
-          className="stat-ring-track"
-          cx={center}
-          cy={center}
-          r={radius}
-          strokeWidth={RING_WIDTH}
-        />
-        {arcLength > 0 && (
-          <circle
-            className={
-              showVisiblePart
-                ? "stat-ring-arc stat-ring-arc-loaded"
-                : "stat-ring-arc"
-            }
-            cx={center}
-            cy={center}
-            r={radius}
-            strokeWidth={RING_WIDTH}
-            strokeDasharray={dash}
-            // start at 12 o'clock, shifted by the slice's start, and run clockwise
-            transform={rotation}
-          />
-        )}
-        {visibleLength > 0 && (
-          <circle
-            className="stat-ring-arc"
-            cx={center}
-            cy={center}
-            r={radius}
-            strokeWidth={RING_WIDTH}
-            strokeDasharray={`${circumference * visibleLength} ${circumference}`}
-            transform={rotation}
-          />
-        )}
+      <svg
+        className="stat-ring"
+        viewBox={`0 0 ${nodeSize * 2} ${nodeSize * 2}`}
+      >
+        {arc(1, { className: "stat-ring-track" })}
+        {arcLength > 0 &&
+          arc(arcLength, {
+            className: partlyHidden
+              ? "stat-ring-arc stat-ring-arc-loaded"
+              : "stat-ring-arc",
+          })}
+        {partlyHidden &&
+          (visibleInSlice ?? 0) > 0 &&
+          arc(atLeastASliver((visibleInSlice ?? 0) / sliceTotal), {
+            className: "stat-ring-arc",
+          })}
         {interactive && (
           <>
-            {/* a wide invisible stroke so the arc is easy to grab when zoomed out */}
+            {arc(arcLength, {
+              className: "stat-ring-hit",
+              strokeWidth: HIT_WIDTH,
+              ...dragWith("shift"),
+            })}
+            <circle className="stat-handle" {...start} r={HANDLE_RADIUS} />
+            <circle className="stat-handle" {...end} r={HANDLE_RADIUS} />
             <circle
-              className="stat-ring-hit"
-              cx={center}
-              cy={center}
-              r={radius}
-              strokeWidth={BODY_HIT_WIDTH}
-              strokeDasharray={dash}
-              transform={rotation}
-              onPointerDown={beginDrag("shift")}
-              {...keepFromNvl}
-            />
-            <circle
-              className="stat-handle"
-              cx={startPoint.x}
-              cy={startPoint.y}
-              r={HANDLE_RADIUS}
-            />
-            <circle
-              className="stat-handle"
-              cx={endPoint.x}
-              cy={endPoint.y}
-              r={HANDLE_RADIUS}
+              className="stat-handle-hit"
+              {...start}
+              r={handleHitRadius}
+              {...dragWith("start")}
             />
             <circle
               className="stat-handle-hit"
-              data-handle="start"
-              cx={startPoint.x}
-              cy={startPoint.y}
+              {...end}
               r={handleHitRadius}
-              onPointerDown={beginDrag("start")}
-              {...keepFromNvl}
-            />
-            <circle
-              className="stat-handle-hit"
-              data-handle="end"
-              cx={endPoint.x}
-              cy={endPoint.y}
-              r={handleHitRadius}
-              onPointerDown={beginDrag("end")}
-              {...keepFromNvl}
+              {...dragWith("end")}
             />
           </>
         )}
@@ -317,7 +253,7 @@ export const StatOverlay = ({
         </Typography>
         <Typography variant="body-small" className="stat-line">
           {dragSlice
-            ? `${formatCount(dragSlice.skip + 1)}\u2013${formatCount(dragSlice.skip + dragSlice.count)} of ${formatCount(sliceTotal)}${sliceTotal < total ? " connected" : ""}${dragSlice.count >= maxCount ? " (max)" : ""}`
+            ? `${formatCount(dragSlice.skip + 1)}\u2013${formatCount(dragSlice.skip + dragSlice.count)} of ${formatCount(sliceTotal)}`
             : `${formatPercent(fractionOf(inScene, total))} of ${formatCount(total)}`}
         </Typography>
       </div>

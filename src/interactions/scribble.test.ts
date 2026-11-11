@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { analyseScribbles } from "./scribble";
 import type { SceneNode, SceneRelationship, Stroke } from "./scribble";
-import type { Point } from "./viewport";
+import type { Point } from "@neo4j-nvl/base";
 
 // Two nodes 300 apart on the x axis, joined by one relationship.
 const nodes: SceneNode[] = [

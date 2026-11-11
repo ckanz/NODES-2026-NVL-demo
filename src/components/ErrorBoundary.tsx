@@ -5,10 +5,7 @@ import type { ErrorInfo, ReactNode } from "react";
 type ErrorBoundaryProps = { children: ReactNode };
 type ErrorBoundaryState = { error: Error | null };
 
-/**
- * Last line of defence: an error thrown while rendering (by NVL, an overlay, a Needle component) would otherwise
- * unmount everything and leave a blank page. Shows what went wrong and offers a reload instead.
- */
+// Without this, a render error unmounts everything and leaves a blank page.
 export class ErrorBoundary extends Component<
   ErrorBoundaryProps,
   ErrorBoundaryState
@@ -20,7 +17,7 @@ export class ErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    // The place to report to error tracking, if there is one.
+    // Report to error tracking here, if there is one.
     console.error(
       "Unhandled error while rendering",
       error,

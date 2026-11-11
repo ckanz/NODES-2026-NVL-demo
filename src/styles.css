@@ -8,7 +8,6 @@
   color: var(--theme-color-neutral-text-default);
 }
 
-/* One header across the top, split in the same two halves as the panes below it */
 .app-header {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -54,7 +53,6 @@
   min-height: 0;
 }
 
-/* Two equal halves: schema on the left, data on the right */
 .pane {
   position: relative;
   flex: 0 0 50%;
@@ -67,17 +65,16 @@
   border-left: 1px solid var(--theme-color-neutral-border-weak);
 }
 
-/* Each graph fills its pane. NVL needs an explicit width and height. */
+/* NVL needs an explicit width and height. */
 .graph-fullscreen {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  /* Own stacking context, so the scribble grid (z-index -1) sits behind NVL's canvas but inside the pane */
+  /* So the scribble grid (z-index -1) sits behind NVL's canvas but inside the pane */
   isolation: isolate;
 }
 
-/* Floating Needle-styled panels over the graph */
 .panel {
   position: absolute;
   z-index: 1;
@@ -112,7 +109,6 @@
   height: 160px;
 }
 
-/* Centered hint shown while nothing is selected */
 .empty-hint {
   position: absolute;
   inset: 0;
@@ -124,15 +120,9 @@
   padding: var(--space-48);
 }
 
-/*
- * Overlay content that NVL places over schema nodes.
- * NVL lays each overlay out in a box (node: its diameter, relationship: along the edge) and scales the
- * whole box with the zoom, so sizes here are in graph units, not screen pixels: they look small when
- * the graph is zoomed out and grow as you zoom in.
- */
+/* Schema node overlays. NVL scales them with the zoom, so sizes are in graph units, not screen pixels. */
 .app {
-  /* Bright red for the share-on-screen arc. Needle's own danger color is a dark orange-red,
-     too quiet for this, so this is a deliberate exception to using only theme tokens. */
+  /* Deliberately not a theme token: Needle's danger color is too quiet for this. */
   --stat-accent: #ff1a2e;
   --stat-halo: var(--theme-color-neutral-bg-weak);
 }
@@ -152,7 +142,7 @@
   text-align: center;
 }
 
-/* Text sits over nodes, edges and neighbours, so give it a soft halo instead of a box */
+/* A halo instead of a box, since text sits over nodes and edges */
 .stat-title,
 .stat-line {
   color: var(--theme-color-neutral-text-default);
@@ -163,7 +153,6 @@
     0 0 12px var(--stat-halo);
 }
 
-/* ---- node ---- */
 .stat-ring {
   position: absolute;
   inset: 0;
@@ -183,12 +172,12 @@
   stroke: var(--stat-accent);
 }
 
-/* Loaded but not all on screen: the slice is drawn faintly, the visible part solid on top. */
+/* Faint slice; the part on screen is drawn solid on top. */
 .stat-ring-arc-loaded {
   opacity: 0.35;
 }
 
-/* The ring is draggable once the label is loaded. Only these shapes take pointer events. */
+/* Only these shapes take pointer events. */
 .stat-ring-hit {
   fill: none;
   stroke: transparent;
@@ -211,7 +200,6 @@
   touch-action: none;
 }
 
-/* Centered on the node and free to spill over its edge */
 .stat-text {
   position: absolute;
   inset: 0;
@@ -234,7 +222,7 @@
   font-weight: 500;
 }
 
-/* Loading state over the data graph. The minimap (z-index 1) stays above it. */
+/* The minimap (z-index 1) stays above it. */
 .loading-overlay {
   position: absolute;
   inset: 0;
@@ -261,7 +249,7 @@
   box-shadow: var(--theme-shadow-raised);
 }
 
-/* ---- History: snapshots as a 3D stack receding into the screen, filling the data pane ---- */
+/* ---- History ---- */
 .time-machine {
   position: absolute;
   inset: 0;
@@ -271,7 +259,7 @@
   outline: none;
 }
 
-/* Floats over the stack, with no bar of its own, so the cards can fill the pane */
+/* No bar of its own, so the cards can fill the pane */
 .time-machine-header {
   position: absolute;
   top: var(--space-12);
@@ -289,8 +277,7 @@
   margin-left: var(--space-8);
 }
 
-/* The cards live in 3D: perspective makes the ones further back smaller, and the vanishing point sits high
-   so the older ones climb up and away. */
+/* A high vanishing point, so older cards climb up and away */
 .time-machine-stage {
   position: absolute;
   inset: 0;
@@ -298,7 +285,7 @@
   perspective-origin: 50% 8%;
 }
 
-/* The front card fills most of the pane, leaving a band at the top where the older cards peek out as tabs */
+/* Leaves a band at the top where older cards peek out as tabs */
 .time-machine-card {
   all: unset;
   box-sizing: border-box;
@@ -323,8 +310,8 @@
   outline: 2px solid var(--theme-color-primary-border-strong);
 }
 
-/* The picture is the whole pane as it was, drawn on the page background, so it blends into the card */
 .time-machine-image {
+  position: relative;
   display: block;
   width: 100%;
   height: 100%;
@@ -334,12 +321,22 @@
   user-select: none;
 }
 
-/* The pane's title panel, replicated on each card. It is only a picture of the panel. */
+.snapshot-picture-spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.time-machine-image img ~ .snapshot-picture-spinner {
+  display: none;
+}
+
+/* Only a picture of the panel */
 .time-machine-card .panel-title {
   pointer-events: none;
 }
 
-/* A tab hanging above the card. It is what shows of the cards further back. */
 .time-machine-tab {
   position: absolute;
   bottom: 100%;
@@ -365,7 +362,6 @@
   white-space: nowrap;
 }
 
-/* Scribbles drawn over the graph. Drawn by hand on this canvas; the mouse passes straight through it. */
 .scribble-canvas {
   position: absolute;
   inset: 0;
@@ -377,9 +373,8 @@
 }
 
 /*
- * Graph paper behind the data graph while scribbling. NVL draws on a transparent canvas, so it shows through.
- * Two layers of lines: strong ones every few cells, then weak ones every cell. GraphPane sets the size and
- * position as the view moves; layer order here must match the backgroundSize it sets (major, major, minor, minor).
+ * Graph paper, visible through NVL's transparent canvas. Layer order must match the backgroundSize GraphPane sets
+ * (major, major, minor, minor).
  */
 .scribble-grid {
   position: absolute;
@@ -400,12 +395,12 @@
   opacity: 0.6;
 }
 
-/* What scribble mode does, along the bottom of the data pane. It ignores the mouse so drawing can go under it. */
+/* Ignores the mouse so drawing can go under it */
 .scribble-hint {
   position: absolute;
   z-index: 2;
   bottom: var(--space-16);
-  /* Centred in the room left of the minimap (240px plus its padding and border), at most 560px wide */
+  /* Centred left of the minimap (240px plus padding and border) */
   left: var(--space-16);
   right: calc(246px + 2 * var(--space-16));
   max-width: 560px;
@@ -422,7 +417,6 @@
   pointer-events: none;
 }
 
-/* Shown by ErrorBoundary when rendering failed. */
 .fatal-error {
   display: flex;
   flex-direction: column;

@@ -1,10 +1,5 @@
-/**
- * Reads what the user meant by their scribbles. Pure geometry: no NVL, no React.
- *
- * Everything is in graph coordinates (the same space as node positions), so it does not matter what the
- * zoom was when a stroke was drawn.
- */
-import type { Point } from "./viewport";
+// Interprets scribbles. Pure geometry in graph coordinates, so zoom doesn't matter.
+import type { Point } from "@neo4j-nvl/base";
 
 export type Stroke = Point[];
 
@@ -12,24 +7,21 @@ export type SceneNode = {
   id: string;
   x: number;
   y: number;
-  /** Radius in graph units. */ radius: number;
+  radius: number;
 };
 export type SceneRelationship = { id: string; from: string; to: string };
 
 export type ScribbleResult = {
-  /** Strokes that crossed a node, or crossed a circle drawn around some. */
   dismissNodes: string[];
-  /** Strokes that crossed a relationship. */
   dismissRelationships: string[];
-  /** Strokes drawn from one node to another. */
   paths: { from: string; to: string }[];
-  /** Indices of the strokes that were used. The rest are left on screen. */
+  // Indices of used strokes. The rest stay on screen.
   consumed: number[];
 };
 
-// A stroke counts as touching a node a little outside its edge, because hands are not precise.
+// Strokes count as touching a node slightly outside its edge; hands aren't precise.
 const NODE_REACH = 1.2;
-// A stroke is a circle when its ends meet (compared with its size) and it encloses some area.
+// A circle's ends meet (relative to its size) and it encloses some area.
 const CLOSED_GAP_RATIO = 0.3;
 const CLOSED_MIN_AREA_RATIO = 0.25;
 const MIN_POINTS = 5;
@@ -45,7 +37,7 @@ const boundingDiagonal = (stroke: Stroke): number => {
   );
 };
 
-/** Shoelace formula, treating the stroke as a closed shape. */
+// Shoelace formula.
 const polygonArea = (polygon: Stroke): number => {
   let sum = 0;
   for (let i = 0; i < polygon.length; i++) {
@@ -71,7 +63,7 @@ const isCircle = (stroke: Stroke): boolean => {
   );
 };
 
-/** Ray casting. */
+// Ray casting.
 const insidePolygon = (point: Point, polygon: Stroke): boolean => {
   let inside = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -107,7 +99,7 @@ const polylineCrossesSegment = (
   return false;
 };
 
-/** Do two scribbles cross each other anywhere? The second is treated as an outline, so it is closed up. */
+// The outline is treated as closed.
 const strokeCrossesOutline = (stroke: Stroke, outline: Stroke): boolean => {
   for (let i = 0; i < outline.length; i++) {
     if (
@@ -151,10 +143,7 @@ const nodeAt = (point: Point, nodes: SceneNode[]): SceneNode | undefined => {
   return best;
 };
 
-/**
- * A stroke "crosses" a node when it passes through it and carries on: it starts and ends outside it.
- * One that merely starts or ends on a node does not, so beginning a line on a node does not dismiss it.
- */
+// Only strokes that start and end outside the node cross it, so starting a line on a node doesn't dismiss it.
 const crossesNode = (stroke: Stroke, node: SceneNode): boolean => {
   const reach = node.radius * NODE_REACH;
   if (
@@ -167,7 +156,7 @@ const crossesNode = (stroke: Stroke, node: SceneNode): boolean => {
   return false;
 };
 
-/** A relationship is drawn between its nodes; the part inside each node is not counted. */
+// The part of the relationship inside each node is not counted.
 const crossesRelationship = (
   stroke: Stroke,
   from: SceneNode,
@@ -183,11 +172,9 @@ const crossesRelationship = (
 };
 
 /**
- * What the scribbles mean:
- * - a line from one node to another: find the shortest path between them
- * - a stroke through a node or relationship: dismiss it
- * - a circle around some nodes, then a stroke through the circle: dismiss every node inside it
- * A circle on its own does nothing: it only counts when a stroke in the same session crosses it.
+ * - line from node to node: shortest path
+ * - stroke through a node or relationship: dismiss it
+ * - stroke through a circle: dismiss the nodes inside (a circle alone does nothing)
  */
 export const analyseScribbles = (
   strokes: Stroke[],
@@ -218,7 +205,6 @@ export const analyseScribbles = (
   for (const { stroke, index } of usable) {
     if (circleIndices.has(index)) continue;
 
-    // A line from one node to another.
     const first = nodeAt(stroke[0], nodes);
     const last = nodeAt(stroke[stroke.length - 1], nodes);
     if (first && last && first.id !== last.id) {
@@ -232,7 +218,6 @@ export const analyseScribbles = (
       continue;
     }
 
-    // A stroke through a circle dismisses what is inside it.
     const crossedCircles = circles.filter((circle) =>
       strokeCrossesOutline(stroke, circle.outline),
     );
@@ -245,7 +230,6 @@ export const analyseScribbles = (
       continue;
     }
 
-    // A stroke through nodes and relationships dismisses them.
     const crossedNodes = nodes.filter((node) => crossesNode(stroke, node));
     const crossedRelationships = relationships.filter((relationship) => {
       const from = nodeById.get(relationship.from);

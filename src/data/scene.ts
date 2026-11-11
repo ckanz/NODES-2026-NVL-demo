@@ -1,25 +1,70 @@
-/**
- * The data graph on screen, worked out from what is loaded and what the user hid. Pure functions: no React.
- */
-import type { Node } from "@neo4j-nvl/base";
+// The data graph and what is on screen. Pure functions: no driver, no React.
+import type { Node, Relationship } from "@neo4j-nvl/base";
 
-import { mergeGraphs, patternKey } from "./graph";
-import type { DataGraph, Pattern } from "./graph";
-import type { SceneState } from "./snapshots";
+import type { Slice } from "./neo4j";
+
+export type GraphData = {
+  nodes: Node[];
+  relationships: Relationship[];
+};
+
+export type NodeInfo = { labels: string[] };
+
+// A data relationship's caption is its type.
+export type DataGraph = GraphData & { nodeInfo: Map<string, NodeInfo> };
+
+// (fromLabel)-[type]->(toLabel)
+export type Pattern = { type: string; fromLabel: string; toLabel: string };
+
+export const patternKey = ({ fromLabel, type, toLabel }: Pattern) =>
+  `${fromLabel}|${type}|${toLabel}`;
+
+// The first occurrence of an element wins, so put the results whose look should win first.
+export const mergeGraphs = (graphs: Iterable<DataGraph>): DataGraph => {
+  const nodes = new Map<string, Node>();
+  const relationships = new Map<string, Relationship>();
+  const nodeInfo = new Map<string, NodeInfo>();
+  for (const graph of graphs) {
+    for (const node of graph.nodes)
+      if (!nodes.has(node.id)) nodes.set(node.id, node);
+    for (const rel of graph.relationships)
+      if (!relationships.has(rel.id)) relationships.set(rel.id, rel);
+    for (const [id, info] of graph.nodeInfo)
+      if (!nodeInfo.has(id)) nodeInfo.set(id, info);
+  }
+  return {
+    nodes: [...nodes.values()],
+    relationships: [...relationships.values()],
+    nodeInfo,
+  };
+};
+
+// What one click on the schema loaded.
+export type Item = { title: string; data: DataGraph };
+
+// Never changed in place, so keeping the references is enough to restore a state later.
+export type SceneState = {
+  items: ReadonlyMap<string, Item>;
+  hiddenLabels: ReadonlySet<string>;
+  /** Dismissed by scribbling. */
+  hiddenNodes: ReadonlySet<string>;
+  hiddenRelationships: ReadonlySet<string>;
+  /** Labels not listed use their default slice. */
+  slices: ReadonlyMap<string, Slice>;
+};
 
 export type Scene = DataGraph & { nodeById: Map<string, Node> };
 
 /**
- * Labels whose slice the user set with the ring, with the nodes in that slice. Such a slice replaces, rather than
- * adds to, the label's nodes: other nodes of the label are not drawn, unless `keep` holds them (nodes the user
- * asked for one by one, through an expansion or a path).
+ * Labels sliced with the ring, with their slice's nodes. Other nodes of those labels are not drawn unless `keep`
+ * holds them (nodes from an expansion or a path).
  */
 export type SliceRestriction = {
   slicedLabels: Map<string, Set<string>>;
   keep: Set<string>;
 };
 
-/** Whether a node is outside every set slice of its labels (and so not drawn). Unsliced labels never exclude. */
+// Unsliced labels never exclude a node.
 const outsideSlices = (
   id: string,
   labels: string[],
@@ -31,9 +76,8 @@ const outsideSlices = (
 };
 
 /**
- * Everything selected, de-duplicated (a node reached by two selections is drawn once), minus what the user took
- * away: hidden labels, nodes and relationships dismissed one by one, and nodes outside a slice set with the ring.
- * Then any relationship that lost an end.
+ * Everything selected, minus hidden labels, dismissed nodes and relationships, nodes outside a ring slice, and
+ * relationships that lost an end.
  */
 export const buildScene = (
   {
@@ -69,10 +113,7 @@ export const buildScene = (
   return { nodes: [...nodeById.values()], relationships, nodeInfo, nodeById };
 };
 
-/**
- * Whether everything a selection loaded is on screen. It can be loaded but partly hidden: an end label was
- * removed (possibly a second label of its nodes), or some of its nodes or relationships were dismissed.
- */
+// A selection can be loaded but partly hidden, by a removed label or dismissed elements.
 export const isFullyVisible = (data: DataGraph, scene: Scene): boolean => {
   const shownRelationships = new Set(scene.relationships.map((rel) => rel.id));
   return (
@@ -81,7 +122,6 @@ export const isFullyVisible = (data: DataGraph, scene: Scene): boolean => {
   );
 };
 
-/** How many of the nodes a selection loaded for `label` are on screen. */
 export const countVisible = (
   data: DataGraph,
   scene: Scene,
@@ -93,18 +133,14 @@ export const countVisible = (
   return count;
 };
 
-/** Which nodes on screen a selected pattern must be connected between. Ids are sorted, so requests compare cheaply. */
+// Ids are sorted, so requests compare cheaply.
 export type ConnectionRequest = {
   pattern: Pattern;
   fromIds: string[];
   toIds: string[];
 };
 
-/**
- * For each selected pattern, the nodes on screen at each of its ends: every relationship of the pattern between
- * them belongs in the scene. A node with several labels counts for each of them. Patterns with nothing on screen
- * at one end need nothing, so they are left out.
- */
+// The on-screen nodes at each end of every selected pattern. Patterns with an empty end are left out.
 export const connectionRequests = (
   scene: Scene,
   patterns: Iterable<Pattern>,
@@ -132,7 +168,6 @@ export const connectionRequests = (
 const sameIds = (a: string[], b: string[]) =>
   a.length === b.length && a.every((id, index) => id === b[index]);
 
-/** Whether two requests ask for the same thing, so the earlier answer still holds. */
 export const sameRequest = (
   a: ConnectionRequest | undefined,
   b: ConnectionRequest,
@@ -142,7 +177,6 @@ export const sameRequest = (
   sameIds(a.fromIds, b.fromIds) &&
   sameIds(a.toIds, b.toIds);
 
-/** How many nodes of each label, and relationships of each pattern (by patternKey), are on screen. */
 export const countScene = ({ nodeInfo, relationships }: Scene) => {
   const labels = new Map<string, number>();
   const patterns = new Map<string, number>();
@@ -151,7 +185,7 @@ export const countScene = ({ nodeInfo, relationships }: Scene) => {
   for (const info of nodeInfo.values())
     for (const label of info.labels) bump(labels, label);
   for (const rel of relationships) {
-    // A data relationship's caption is its type (see toGraphData).
+    // A data relationship's caption is its type.
     const type = rel.caption ?? "";
     for (const fromLabel of nodeInfo.get(rel.from)?.labels ?? []) {
       for (const toLabel of nodeInfo.get(rel.to)?.labels ?? [])

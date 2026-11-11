@@ -28,8 +28,6 @@ import {
   formatPercent,
   fractionOf,
 } from "./utils/format";
-import { mergeGraphs, patternKey } from "./data/graph";
-import type { DataGraph, GraphData, Pattern } from "./data/graph";
 import {
   defaultSlice,
   fetchConnections,
@@ -43,31 +41,38 @@ import {
 import type { SchemaGraph, Slice } from "./data/neo4j";
 import {
   buildScene,
+  mergeGraphs,
+  patternKey,
   connectionRequests,
   countScene,
   countVisible,
   isFullyVisible,
   sameRequest,
 } from "./data/scene";
-import type { ConnectionRequest, SliceRestriction } from "./data/scene";
+import type {
+  ConnectionRequest,
+  DataGraph,
+  GraphData,
+  Item,
+  Pattern,
+  SceneState,
+  SliceRestriction,
+} from "./data/scene";
 import type { ScribbleResult } from "./interactions/scribble";
-import type { Item, SceneState, Snapshot } from "./data/snapshots";
+import type { Snapshot } from "./hooks/useHistory";
 import { useHistory } from "./hooks/useHistory";
 import { useScribbleShortcuts } from "./hooks/useScribbleShortcuts";
 
-// Keys of loaded selections (and of their loading state).
+// Keys of loaded selections and their loading state.
 const LABEL_KEY_PREFIX = "node:";
 const labelKey = (label: string) => `${LABEL_KEY_PREFIX}${label}`;
 const relationshipKey = (pattern: Pattern) => `rel:${patternKey(pattern)}`;
-/** Every relationship of a selected pattern between the nodes on screen, kept in step with the scene. */
+// All relationships of a selected pattern between on-screen nodes, kept in step with the scene.
 const CONNECTION_KEY_PREFIX = "conn:";
 const connectionKey = (pattern: Pattern) =>
   `${CONNECTION_KEY_PREFIX}${patternKey(pattern)}`;
 
-/**
- * A slice set with the ring replaces the label's nodes instead of adding to them: only the nodes in that slice are
- * drawn, plus those the user asked for one by one (expanding a node, a shortest path). Other queries stay additive.
- */
+// A ring slice replaces the label's nodes instead of adding to them; nodes requested one by one are kept.
 const sliceRestriction = (
   items: ReadonlyMap<string, Item>,
   slices: ReadonlyMap<string, Slice>,
@@ -89,20 +94,18 @@ const sliceRestriction = (
   return { slicedLabels, keep };
 };
 
-/** How a pattern reads to the user, e.g. in history: (:From)-[:TYPE]->(:To). */
 const patternTitle = ({ fromLabel, type, toLabel }: Pattern) =>
   `(:${fromLabel})-[:${type}]->(:${toLabel})`;
 
-/** How long the scene must stay still before a selected pattern's connections are looked up again. */
+// How long the scene must stay still before connections are looked up again.
 const CONNECTION_SYNC_DELAY_MS = 150;
 
-// How far the data graph can be zoomed out. NVL's default (0.075) is too tight for tens of thousands of nodes,
-// and fit() stops at the same limit.
+// NVL's default min zoom (0.075) is too tight for tens of thousands of nodes, and fit() stops there too.
 const DATA_MIN_ZOOM = 0.001;
 
 // Schema nodes are drawn larger than NVL's default so their text overlay has room.
 const SCHEMA_NODE_SIZE = 70;
-// Relationship captions in the schema, as a multiple of NVL's default (1, a 6px font). Drawn by NVL on the canvas.
+// Schema relationship caption size, as a multiple of NVL's default (6px font).
 const SCHEMA_CAPTION_SIZE = 3.5;
 
 const errorMessage = (e: unknown) =>
@@ -130,7 +133,6 @@ export const App = () => {
   const [schema, setSchema] = useState<SchemaGraph | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // The scene: what is loaded and what is hidden (see SceneState).
   const [items, setItems] = useState<ReadonlyMap<string, Item>>(new Map());
   const [hiddenLabels, setHiddenLabels] = useState<ReadonlySet<string>>(
     new Set(),
@@ -142,22 +144,21 @@ export const App = () => {
     ReadonlySet<string>
   >(new Set());
   const [slices, setSlices] = useState<ReadonlyMap<string, Slice>>(new Map());
-  /** Selections whose query is running. */
   const [loadingKeys, setLoadingKeys] = useState<ReadonlySet<string>>(
     new Set(),
   );
 
-  /** The data graph's minimap. Held in state because NVL may only start once this element exists. */
+  // In state because NVL may only start once this element exists.
   const [minimapEl, setMinimapEl] = useState<HTMLDivElement | null>(null);
-  /** Scribble mode: the mouse draws on the graph, and what was drawn is acted on when it ends. */
+  // Scribble mode: the mouse draws on the graph; drawings are applied when it ends.
   const [scribbling, setScribbling] = useState(false);
-  /** Where to put the nodes and camera after a restore. Cleared once applied. */
+  // Node positions and camera to apply after a restore; cleared once applied.
   const [restoreView, setRestoreView] = useState<ViewState | null>(null);
-  /** Changing this starts a fresh data graph, which is how a restore re-creates the scene. */
+  // Changing this starts a fresh data graph; used by restore.
   const [graphKey, setGraphKey] = useState(0);
   const dataPaneRef = useRef<GraphPaneHandle>(null);
 
-  // Mirrors of state for event handlers, which must not go stale.
+  // Refs so event handlers don't read stale state.
   const sceneStateRef = useRef<SceneState>({
     items,
     hiddenLabels,
@@ -204,7 +205,7 @@ export const App = () => {
   const sceneRef = useRef(scene);
   sceneRef.current = scene;
   const sceneCounts = useMemo(() => countScene(scene), [scene]);
-  /** For each label with a slice of its own, how many of that slice's nodes are on screen (for its ring). */
+  // Per sliced label: how many of its slice's nodes are on screen (for its ring).
   const visibleInSlices = useMemo(() => {
     const counts = new Map<string, number>();
     for (const [key, item] of items) {
@@ -214,7 +215,6 @@ export const App = () => {
     }
     return counts;
   }, [items, scene]);
-  /** How much of each label and pattern is on screen, for click handlers. */
   const sceneCountsRef = useRef(sceneCounts);
   sceneCountsRef.current = sceneCounts;
   const countsRef = useRef({ nodes: 0, relationships: 0 });
@@ -256,15 +256,12 @@ export const App = () => {
     });
   }, []);
 
-  /** Bumped by "Clear" and by a restore. Queries started before drop their results instead of adding them back. */
+  // Bumped by Clear and restore, so queries started earlier drop their results.
   const generation = useRef(0);
-  /** The last connection lookup started for each selected pattern (by patternKey). See the sync effect below. */
+  // Last connection lookup started per selected pattern (by patternKey).
   const connectionRequestsRef = useRef(new Map<string, ConnectionRequest>());
 
-  /**
-   * Load a selection and add it to the scene. Does nothing if it is loaded or already on its way. `unhide`
-   * labels are shown again at the same moment the data arrives, and `onArrive` runs then too.
-   */
+  // No-op if already loaded or loading. `unhide` labels are shown and `onArrive` runs when the data arrives.
   const addItem = useCallback(
     (
       key: string,
@@ -293,7 +290,6 @@ export const App = () => {
     [record, showLabels, setLoading],
   );
 
-  /** Remove every node and relationship from the data graph and start over. */
   const clearAll = useCallback(() => {
     record("Clear");
     generation.current += 1;
@@ -307,10 +303,7 @@ export const App = () => {
     setError(null);
   }, [record]);
 
-  /**
-   * The user asked for this data (a path, a node's connections, a pattern), so anything in it that they had
-   * dismissed or hidden comes back with it.
-   */
+  // The user asked for this data, so anything in it they had hidden comes back.
   const revealAll = useCallback(
     (data: DataGraph) => {
       const nodeIds = new Set(data.nodes.map((node) => node.id));
@@ -332,11 +325,7 @@ export const App = () => {
 
   // ---- Schema clicks ---------------------------------------------------------------------------------------
 
-  /**
-   * Clicking a label that is on screen removes just that label: its nodes and the relationships attached to
-   * them. Clicking a label that is not on screen adds its nodes on their own, with no connections and no
-   * neighbouring labels. Relationships come from clicking a relationship pattern.
-   */
+  // A label on screen is removed with its relationships; otherwise its nodes are added alone, without connections.
   const onSchemaNodeClick = useCallback(
     (node: Node) => {
       const label = schema?.labelById.get(node.id);
@@ -346,7 +335,7 @@ export const App = () => {
         setHiddenLabels((current) => withKey(current, label, true));
         return;
       }
-      // Its nodes were loaded before and only hidden: show them again, no query needed.
+      // Loaded before and only hidden: show again without a query.
       if (sceneStateRef.current.items.has(labelKey(label))) {
         if (sceneStateRef.current.hiddenLabels.has(label)) {
           record(`Show (:${label})`);
@@ -364,11 +353,8 @@ export const App = () => {
     [schema, addItem, record, showLabels, sliceFor],
   );
 
-  /**
-   * Clicking a relationship pattern adds it with its end nodes, or removes it again. A pattern that is loaded
-   * but partly hidden (an end label was removed, or some of it was dismissed) is shown in full first, so a
-   * click never takes away a pattern you could not fully see.
-   */
+  // Adds or removes a pattern. A partly hidden pattern is shown in full first, so a click never removes
+  // something you could not fully see.
   const onSchemaRelationshipClick = useCallback(
     (relationship: Relationship) => {
       const pattern = schema?.relationshipById.get(relationship.id);
@@ -414,15 +400,11 @@ export const App = () => {
 
   // ---- Connections of selected patterns --------------------------------------------------------------------
 
-  /** Connection lookups running. They only show the small spinner: the graph stays fully usable meanwhile. */
+  // Running connection lookups only show the small spinner; the graph stays usable.
   const [syncingConnections, setSyncingConnections] = useState(0);
 
-  /**
-   * A selected pattern always shows every one of its relationships between the nodes on screen, whatever brought
-   * those nodes in (a label, a slice, an expansion, a path, unhiding). Once the scene settles, any selected pattern
-   * whose end nodes changed is looked up again. The lookup returns relationships only, so it never adds a node and
-   * cannot set itself off again.
-   */
+  // Once the scene settles, re-query selected patterns whose end nodes changed. Lookups return relationships
+  // only, so they never add nodes and cannot retrigger themselves.
   useEffect(() => {
     if (!schema) return;
     const timer = setTimeout(() => {
@@ -431,7 +413,7 @@ export const App = () => {
       );
       const requests = connectionRequests(scene, selected);
 
-      // Patterns no longer selected, or with nothing on screen at one end, need no connections.
+      // Drop patterns no longer selected or with nothing on screen at one end.
       const stale = [...connectionRequestsRef.current.keys()].filter(
         (key) => !requests.has(key),
       );
@@ -479,7 +461,7 @@ export const App = () => {
           })
           .catch((e: unknown) => {
             if (!isLatest()) return;
-            // Forget it, so the next change to the scene tries again.
+            // Forget it so the next scene change retries.
             connectionRequestsRef.current.delete(key);
             setError(errorMessage(e));
           })
@@ -489,19 +471,16 @@ export const App = () => {
     return () => clearTimeout(timer);
   }, [schema, items, scene]);
 
-  // Only the latest slice request for a label may update the view, so a slow one cannot overwrite a newer one.
+  // Only the latest slice request per label may land, so a slow one cannot overwrite a newer one.
   const sliceRequests = useRef(new Map<string, number>());
 
-  /**
-   * The user dragged a label's ring: remember the slice and load it. A label that was only on screen as an
-   * end of a relationship pattern becomes a selection of its own, as if it had been clicked. Connections are
-   * only followed for the relationship patterns visible right now, so nothing new is selected.
-   */
+  // A label shown only as a pattern end becomes its own selection. Only currently visible patterns are
+  // followed, so nothing new is selected.
   const changeSlice = useCallback(
     (label: string, slice: Slice) => {
       if (!schema) return;
       record(`Change slice of (:${label})`);
-      // Shown straight away, so the ring stays where it was dropped while the nodes load; undone if they cannot be.
+      // Set now so the ring stays where dropped while loading; reverted on failure.
       const previous = sceneStateRef.current.slices.get(label);
       setSlices((current) => new Map(current).set(label, slice));
       const key = labelKey(label);
@@ -549,13 +528,12 @@ export const App = () => {
 
   // ---- History ---------------------------------------------------------------------------------------------
 
-  /** Go back to a snapshot: its data, hidden labels and slices, then its node positions and camera. */
   const restoreSnapshot = useCallback(
     (snapshot: Snapshot) => {
-      // Going back is a change too. Keep where we were, so it can be undone.
+      // Record the current state so going back can be undone.
       record(`Before going back to "${snapshot.reason}"`);
-      generation.current += 1; // queries still running would otherwise land on top of the restored graph
-      connectionRequestsRef.current.clear(); // look the restored scene's connections up afresh
+      generation.current += 1; // drop results of queries still running
+      connectionRequestsRef.current.clear();
       setItems(snapshot.items);
       setHiddenLabels(snapshot.hiddenLabels);
       setHiddenNodes(snapshot.hiddenNodes);
@@ -572,10 +550,7 @@ export const App = () => {
 
   // ---- Data graph interactions -----------------------------------------------------------------------------
 
-  /**
-   * Double-clicking a node shows everything one hop away from it. Double-click it again to take those
-   * connections away. Like everything else, this is a step in the history.
-   */
+  // Double-click loads a node's neighbours; again removes them.
   const onDataNodeDoubleClick = useCallback(
     (node: Node) => {
       const currentSchema = schemaRef.current;
@@ -599,7 +574,6 @@ export const App = () => {
     [record, addItem, removeItem, revealAll],
   );
 
-  /** What the user's scribbles asked for, applied when scribble mode ends. */
   const applyScribbles = useCallback(
     ({ dismissNodes, dismissRelationships, paths }: ScribbleResult) => {
       if (dismissNodes.length > 0 || dismissRelationships.length > 0) {
@@ -639,7 +613,7 @@ export const App = () => {
 
   // ---- Scribble mode ---------------------------------------------------------------------------------------
   const isEmpty = scene.nodes.length === 0;
-  // Scribble mode can only be on while there is a graph to scribble on and the history is closed.
+  // Only with a graph to scribble on and the history closed.
   const canScribble = !isEmpty && !history.nowCard;
   useEffect(() => {
     if (!canScribble) setScribbling(false);
@@ -653,8 +627,7 @@ export const App = () => {
 
   // ---- Schema view -----------------------------------------------------------------------------------------
 
-  // NVL takes DOM elements for overlays. We make one per schema node and render React into it through a
-  // portal, so the same element stays put while its numbers change.
+  // NVL overlays are DOM elements: one stable element per schema node, rendered into via a portal.
   const overlayElements = useRef(new Map<string, HTMLElement>());
   const overlayFor = (id: string): HTMLElement => {
     let element = overlayElements.current.get(id);
@@ -666,9 +639,7 @@ export const App = () => {
     return element;
   };
 
-  // A schema element is highlighted while it is visible in the scene (or on its way): the labels and
-  // relationship patterns you selected, and the end labels a pattern brought in.
-  // Nodes drop their built-in caption for an HTML overlay; relationships keep theirs, with the numbers added.
+  // Highlight schema elements visible in the scene or loading. Nodes use an HTML overlay instead of a caption.
   const schemaView = useMemo<GraphData | null>(() => {
     if (!schema) return null;
     const isLabelOn = (label: string) =>
@@ -697,11 +668,7 @@ export const App = () => {
     };
   }, [schema, loadingKeys, sceneCounts]);
 
-  /**
-   * The slice a label's ring shows. A label you selected has its own slice. One that is only on screen as a
-   * neighbour has none yet, so its ring starts as the nodes currently visible, from the first node on:
-   * dragging it turns it into a selection of its own.
-   */
+  // Labels shown only as neighbours have no slice yet, so their ring starts at the visible nodes.
   const ringSliceFor = (label: string): Slice => {
     const connected = schema?.totals.connected.get(label) ?? 0;
     if (items.has(labelKey(label)))
@@ -779,8 +746,7 @@ export const App = () => {
         <section className="pane pane-left">
           <div className="graph-fullscreen">
             {schemaView ? (
-              // Selection is driven by what is loaded, so NVL's own select-on-click is off. The schema has
-              // captions (labels and types), so it uses the Canvas renderer.
+              // Selection follows what is loaded, so NVL's select-on-click is off. Canvas renderer for captions.
               <GraphPane
                 data={schemaView}
                 instanceId="schema"
@@ -820,9 +786,7 @@ export const App = () => {
 
         <section className="pane pane-right">
           <div className="graph-fullscreen">
-            {/* NVL may only start once the minimap element exists. The graph is unmounted while empty: NVL's WebGL
-              renderer does not redraw after its last nodes are removed, so the old picture would stay on screen.
-              A fresh instance is created when data arrives. */}
+            {/* Unmounted while empty: NVL's WebGL renderer does not redraw after its last nodes are removed. */}
             {isEmpty ? null : minimapEl ? (
               <GraphPane
                 key={graphKey}
@@ -844,7 +808,7 @@ export const App = () => {
             )}
           </div>
 
-          {/* Over the data graph while a query runs. It ignores the mouse, so the graph stays usable underneath. */}
+          {/* Ignores the mouse, so the graph stays usable underneath. */}
           {loadingKeys.size > 0 && (
             <div className="loading-overlay" role="status" aria-live="polite">
               <div className="loading-scrim" />

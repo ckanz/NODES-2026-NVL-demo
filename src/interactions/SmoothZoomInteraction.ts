@@ -1,30 +1,22 @@
 import type { NVL } from "@neo4j-nvl/base";
 
-import { cssPixelsPerUnit } from "./viewport";
-import { normalizeWheelDelta } from "./wheel";
+// Caps a single wheel step, so a fast trackpad flick can't jump the zoom.
+const MAX_DELTA = 200;
 
 export type SmoothZoomOptions = {
-  /**
-   * Time constant of the ease-out in milliseconds. The zoom closes the gap to its target
-   * as `1 - exp(-t / smoothing)`, so a larger value settles more slowly. Default 140.
-   */
+  // Ease-out time constant in ms. Default 140.
   smoothing?: number;
-  /** Zoom speed for a mouse wheel. Each wheel pixel scales the zoom by `exp(-delta * sensitivity)`. Default 0.0018. */
+  // Zoom scales by exp(-delta * sensitivity) per wheel pixel. Default 0.0018.
   wheelSensitivity?: number;
-  /** Zoom speed for trackpad pinch gestures (reported as ctrl + wheel). Default 0.01. */
+  // Trackpad pinch (reported as ctrl + wheel). Default 0.01.
   pinchSensitivity?: number;
-  /** Called after every zoom step with the new zoom level. */
   onZoom?: (zoom: number) => void;
 };
 
-// Stop easing once the remaining gap is below this relative amount.
+// Relative gap below which easing stops.
 const SETTLE_EPSILON = 0.0005;
 
-/**
- * Zooms with the wheel or trackpad pinch around the pointer, easing out towards the target
- * zoom instead of jumping, so the motion decelerates after the gesture ends.
- * Replaces NVL's built-in `ZoomInteraction`.
- */
+// Eased wheel/pinch zoom around the pointer. Replaces NVL's built-in ZoomInteraction.
 export class SmoothZoomInteraction {
   private readonly nvl: NVL;
   private readonly container: HTMLElement;
@@ -34,7 +26,7 @@ export class SmoothZoomInteraction {
   private readonly onZoom?: (zoom: number) => void;
 
   private targetZoom: number | null = null;
-  /** Pointer position in CSS px relative to the container; the point that stays fixed while zooming. */
+  // Pointer position in CSS px relative to the container; stays fixed while zooming.
   private anchor = { x: 0, y: 0 };
   private frame: number | null = null;
 
@@ -46,7 +38,7 @@ export class SmoothZoomInteraction {
     this.pinchSensitivity = options.pinchSensitivity ?? 0.01;
     this.onZoom = options.onZoom;
 
-    // Not passive: we cancel the default so the page does not scroll or browser-zoom.
+    // Not passive, so we can stop the page from scrolling or browser-zooming.
     this.container.addEventListener("wheel", this.onWheel, { passive: false });
   }
 
@@ -63,7 +55,7 @@ export class SmoothZoomInteraction {
     const sensitivity = event.ctrlKey
       ? this.pinchSensitivity
       : this.wheelSensitivity;
-    const delta = normalizeWheelDelta(event);
+    const delta = Math.max(-MAX_DELTA, Math.min(MAX_DELTA, event.deltaY));
 
     const rect = this.container.getBoundingClientRect();
     this.anchor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
@@ -104,13 +96,10 @@ export class SmoothZoomInteraction {
     this.frame = requestAnimationFrame(step);
   }
 
-  /**
-   * Sets the zoom and adjusts the pan so the layout point under the anchor stays under it: the anchor's
-   * offset from the container centre, `(p - pan) * cssPixelsPerUnit(zoom)`, is kept constant.
-   */
+  // Adjusts the pan so the graph point under the anchor stays under it.
   private zoomTo(newZoom: number): void {
-    const oldPerUnit = cssPixelsPerUnit(this.nvl.getScale());
-    const newPerUnit = cssPixelsPerUnit(newZoom);
+    const oldPerUnit = this.nvl.getScale() / window.devicePixelRatio;
+    const newPerUnit = newZoom / window.devicePixelRatio;
     const pan = this.nvl.getPan();
     const { width, height } = this.container.getBoundingClientRect();
     const offsetX = this.anchor.x - width / 2;

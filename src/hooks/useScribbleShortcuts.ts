@@ -5,15 +5,14 @@ import type { GraphPaneHandle } from "../components/GraphPane";
 
 type UseScribbleShortcutsOptions = {
   scribbling: boolean;
-  /** Whether scribble mode may be turned on now. */
   canScribble: boolean;
   setScribbling: (on: boolean) => void;
   paneRef: RefObject<GraphPaneHandle | null>;
 };
 
 /**
- * Keyboard for scribble mode: S starts and finishes it, Escape cancels it (nothing is acted on), Backspace undoes
- * the last stroke. Ignored while typing in a form field, or with a modifier held.
+ * S toggles scribble mode, Escape cancels it, Backspace undoes the last stroke. Ignored in form fields or with a
+ * modifier held.
  */
 export const useScribbleShortcuts = ({
   scribbling,
@@ -45,7 +44,7 @@ export const useScribbleShortcuts = ({
         setScribbling(!scribbling);
       } else if (scribbling && event.key === "Escape") {
         event.preventDefault();
-        paneRef.current?.discardScribbles(); // before turning off, so there is nothing left to act on
+        paneRef.current?.discardScribbles(); // first, so nothing is acted on
         setScribbling(false);
       } else if (scribbling && event.key === "Backspace") {
         event.preventDefault();

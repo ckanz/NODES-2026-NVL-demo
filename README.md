@@ -33,5 +33,5 @@ Without a `.env`, the app connects to `bolt://localhost:7687` as `neo4j` / `pass
   - **History** shows a snapshot of every change; pick one to go back to it.
   - **Clear** empties the scene.
   - Double-click a node to show its neighbours; double-click again to collapse them.
- 
+
 ![img](https://github.com/ckanz/NODES-2026-demo/blob/main/Screenshot.png?raw=true)

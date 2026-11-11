@@ -61,12 +61,25 @@ import type {
 import type { ScribbleResult } from "./interactions/scribble";
 import type { Snapshot } from "./hooks/useHistory";
 import { useHistory } from "./hooks/useHistory";
-import { useScribbleShortcuts } from "./hooks/useScribbleShortcuts";
 
 // Keys of loaded selections and their loading state.
 const LABEL_KEY_PREFIX = "node:";
 const labelKey = (label: string) => `${LABEL_KEY_PREFIX}${label}`;
 const relationshipKey = (pattern: Pattern) => `rel:${patternKey(pattern)}`;
+
+// Labels clicked in the schema, and the end labels of clicked patterns.
+const selectedLabels = (items: ReadonlyMap<string, Item>) => {
+  const labels = new Set<string>();
+  for (const key of items.keys()) {
+    if (key.startsWith(LABEL_KEY_PREFIX))
+      labels.add(key.slice(LABEL_KEY_PREFIX.length));
+    if (key.startsWith("rel:")) {
+      const [fromLabel, , toLabel] = key.slice("rel:".length).split("|");
+      labels.add(fromLabel).add(toLabel);
+    }
+  }
+  return labels;
+};
 // All relationships of a selected pattern between on-screen nodes, kept in step with the scene.
 const CONNECTION_KEY_PREFIX = "conn:";
 const connectionKey = (pattern: Pattern) =>
@@ -199,6 +212,7 @@ export const App = () => {
       buildScene(
         { items, hiddenLabels, hiddenNodes, hiddenRelationships },
         sliceRestriction(items, slices),
+        selectedLabels(items),
       ),
     [items, hiddenLabels, hiddenNodes, hiddenRelationships, slices],
   );
@@ -330,6 +344,16 @@ export const App = () => {
     (node: Node) => {
       const label = schema?.labelById.get(node.id);
       if (!schema || !label) return;
+      // Its nodes can stay on screen through another selected label, so a second click shows it again.
+      if (
+        sceneStateRef.current.hiddenLabels.has(label) &&
+        (sceneStateRef.current.items.has(labelKey(label)) ||
+          (sceneCountsRef.current.labels.get(label) ?? 0) > 0)
+      ) {
+        record(`Show (:${label})`);
+        showLabels([label]);
+        return;
+      }
       if ((sceneCountsRef.current.labels.get(label) ?? 0) > 0) {
         record(`Remove (:${label})`);
         setHiddenLabels((current) => withKey(current, label, true));
@@ -618,12 +642,6 @@ export const App = () => {
   useEffect(() => {
     if (!canScribble) setScribbling(false);
   }, [canScribble]);
-  useScribbleShortcuts({
-    scribbling,
-    canScribble,
-    setScribbling,
-    paneRef: dataPaneRef,
-  });
 
   // ---- Schema view -----------------------------------------------------------------------------------------
 
@@ -698,6 +716,8 @@ export const App = () => {
           <Typography variant="title-4">Data</Typography>
           <Typography variant="body-medium" className="text-neutral-text-weak">
             {formatGraphSummary(scene.nodes.length, scene.relationships.length)}
+            {scene.overCap > 0 &&
+              ` (limit reached, ${formatCount(scene.overCap)} not shown)`}
           </Typography>
           {(loadingKeys.size > 0 || syncingConnections > 0) && (
             <LoadingSpinner size="small" />
@@ -712,7 +732,7 @@ export const App = () => {
               }
               onClick={() => setScribbling((on) => !on)}
             >
-              {scribbling ? "Done (S)" : "Scribble (S)"}
+              {scribbling ? "Done" : "Scribble"}
             </OutlinedButton>
             <OutlinedButton
               variant="neutral"
@@ -831,8 +851,7 @@ export const App = () => {
                 Draw with the mouse. Cross out a node or relationship to dismiss
                 it, draw a line from one node to another for the shortest path,
                 or circle some nodes and cross the circle to dismiss them all.
-                Right-drag pans, scroll zooms. S applies, Backspace undoes a
-                stroke, Esc cancels.
+                Right-drag pans, scroll zooms. Click Done to apply.
               </Typography>
             </div>
           )}

@@ -4,7 +4,7 @@ import {
   ChevronRightIconOutline,
   XMarkIconOutline,
 } from "@neo4j-ndl/react/icons";
-import type { CSSProperties, KeyboardEvent, WheelEvent } from "react";
+import type { CSSProperties, WheelEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import type { NowCard, Snapshot } from "../hooks/useHistory";
@@ -13,9 +13,7 @@ import { SnapshotPicture } from "./SnapshotPicture";
 import { formatGraphSummary } from "../utils/format";
 
 type TimeMachineProps = {
-  /** Oldest first. */
   snapshots: Snapshot[];
-  /** The front card. */
   now: NowCard;
   onRestore: (snapshot: Snapshot) => void;
   onClose: () => void;
@@ -96,15 +94,12 @@ export const TimeMachine = ({
     },
   ];
   const [active, setActive] = useState(cards.length - 1);
-  const rootRef = useRef<HTMLDivElement>(null);
   const wheelTotal = useRef(0);
   const lastStep = useRef(0);
 
   // Bring a snapshot that arrives while open to the front.
   const count = cards.length;
   useEffect(() => setActive(count - 1), [count]);
-  // So the arrow keys work straight away.
-  useEffect(() => rootRef.current?.focus(), []);
 
   const step = (by: number) =>
     setActive((index) => Math.min(count - 1, Math.max(0, index + by)));
@@ -129,32 +124,14 @@ export const TimeMachine = ({
     lastStep.current = now;
   };
 
-  const onKeyDown = (event: KeyboardEvent) => {
-    const keys: Record<string, () => void> = {
-      ArrowLeft: () => step(-1),
-      ArrowDown: () => step(-1),
-      ArrowRight: () => step(1),
-      ArrowUp: () => step(1),
-      Enter: () => choose(active),
-      Escape: onClose,
-    };
-    const action = keys[event.key];
-    if (!action) return;
-    event.preventDefault();
-    action();
-  };
-
   const current = cards[active];
 
   return (
     <div
-      ref={rootRef}
       className="time-machine"
       role="dialog"
       aria-label="History"
-      tabIndex={-1}
       onWheel={onWheel}
-      onKeyDown={onKeyDown}
     >
       <div className="time-machine-header">
         <Typography variant="subheading-small">History</Typography>
@@ -164,7 +141,7 @@ export const TimeMachine = ({
         >
           {current?.snapshot
             ? `${active + 1} of ${count}. Click the front card to go back to this point.`
-            : "Scroll or use the arrow keys to go back in time. Click the front card to return to the live graph."}
+            : "Scroll to go back in time. Click the front card to return to the live graph."}
         </Typography>
         <CleanIconButton
           description="Older"

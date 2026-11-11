@@ -40,14 +40,11 @@ const atLeastASliver = (fraction: number) =>
 const clamp = (value: number, low: number, high: number) =>
   Math.min(high, Math.max(low, value));
 
-/**
- * `travelled` is a fraction of the circle, positive is clockwise. The result covers 1 to `maxCount` nodes and
- * never runs past the last node.
- */
+// The new slice always covers 1 to maxCount nodes and stays within the label's nodes.
 export const moveSlice = (
   mode: DragMode,
   from: Slice,
-  travelled: number,
+  travelled: number, // fraction of the circle, positive is clockwise
   total: number,
   maxCount: number,
 ): Slice => {
@@ -187,12 +184,6 @@ export const StatOverlay = ({
     window.addEventListener("pointercancel", onUp);
   };
 
-  // NVL also listens for mouse down and click, which must not reach it.
-  const dragWith = (mode: DragMode) => ({
-    onPointerDown: beginDrag(mode),
-    onMouseDown: (e: { stopPropagation: () => void }) => e.stopPropagation(),
-    onClick: (e: { stopPropagation: () => void }) => e.stopPropagation(),
-  });
   // At most a quarter of the arc each, so the middle stays free for shifting.
   const handleHitRadius = clamp(
     circumference * arcLength * 0.25,
@@ -204,9 +195,12 @@ export const StatOverlay = ({
 
   return (
     <div ref={rootRef} className="stat-overlay stat-node">
+      {/* NVL's click handler also listens for mouse down and click, which must not reach it. */}
       <svg
         className="stat-ring"
         viewBox={`0 0 ${nodeSize * 2} ${nodeSize * 2}`}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
       >
         {arc(1, { className: "stat-ring-track" })}
         {arcLength > 0 &&
@@ -225,7 +219,7 @@ export const StatOverlay = ({
             {arc(arcLength, {
               className: "stat-ring-hit",
               strokeWidth: HIT_WIDTH,
-              ...dragWith("shift"),
+              onPointerDown: beginDrag("shift"),
             })}
             <circle className="stat-handle" {...start} r={HANDLE_RADIUS} />
             <circle className="stat-handle" {...end} r={HANDLE_RADIUS} />
@@ -233,13 +227,13 @@ export const StatOverlay = ({
               className="stat-handle-hit"
               {...start}
               r={handleHitRadius}
-              {...dragWith("start")}
+              onPointerDown={beginDrag("start")}
             />
             <circle
               className="stat-handle-hit"
               {...end}
               r={handleHitRadius}
-              {...dragWith("end")}
+              onPointerDown={beginDrag("end")}
             />
           </>
         )}

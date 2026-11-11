@@ -17,16 +17,13 @@ import { useScribbles } from "../hooks/useScribbles";
 
 export type NodePosition = { id: string; x: number; y: number };
 
-/** Node positions and camera: enough to put a graph back exactly as it was. */
 export type ViewState = { positions: NodePosition[]; zoom: number; pan: Point };
 
 export type GraphSnapshot = ViewState & {
-  // Never changed in place, so keeping it costs nothing.
   graph: GraphData;
 };
 
 export type GraphPaneHandle = {
-  /** Null if NVL has not started. */
   capture: () => GraphSnapshot | null;
 };
 
@@ -57,7 +54,6 @@ type GraphPaneProps = {
   onRelationshipClick?: (relationship: Relationship) => void;
 };
 
-// One NVL instance with our own pan and zoom. Re-fits the view once the layout settles after `data` changes.
 export const GraphPane = ({
   ref,
   restore,
@@ -79,7 +75,6 @@ export const GraphPane = ({
   const nvlRef = useRef<NVL>(null);
   const [nvlReady, setNvlReady] = useState(false);
 
-  // Refs, because NVL callbacks and our handlers are created only once.
   const dataRef = useRef(data);
   dataRef.current = data;
   const scribbleRef = useRef(scribble);
@@ -138,7 +133,6 @@ export const GraphPane = ({
     [],
   );
 
-  // Must stay after the needsFit effect, so on mount it runs last and cancels the fit.
   const restored = useRef(false);
   useEffect(() => {
     const nvl = nvlRef.current;
@@ -168,7 +162,6 @@ export const GraphPane = ({
   const activeRenderer =
     canvasAboveZoom !== undefined && zoomedIn ? "canvas" : renderer;
 
-  // The wrapper's own pan, zoom and hover handlers stay off: onPan, onZoomAndPan and onHover are never set.
   useEffect(() => {
     const nvl = nvlRef.current;
     if (!nvlReady || !nvl) return;
@@ -187,7 +180,6 @@ export const GraphPane = ({
   const nvlCallbacks = useMemo(
     () => ({
       onInitialization: () => setNvlReady(true),
-      // fit() and resetZoom() bypass our zoom handler.
       onZoomTransitionDone: () => checkZoomRef.current(),
       // Also fires after dragging a node, so only fit when needsFit, or the view jumps.
       onLayoutDone: () => {
@@ -211,7 +203,6 @@ export const GraphPane = ({
     [layout, activeRenderer, instanceId, minimapContainer, minZoom],
   );
 
-  // interactionOptions replaces the defaults, so pass everything we want.
   const interactionOptions = useMemo(
     () => ({ selectOnClick }),
     [selectOnClick],
@@ -219,7 +210,6 @@ export const GraphPane = ({
 
   const mouseEventCallbacks = useMemo(
     () => ({
-      // `false` makes the wrapper remove its drag handler.
       onDrag: !scribble,
       onNodeClick: (node: Node) => onNodeClickRef.current?.(node),
       onNodeDoubleClick: (node: Node) => onNodeDoubleClickRef.current?.(node),

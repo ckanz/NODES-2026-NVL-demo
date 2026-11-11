@@ -255,7 +255,6 @@
   z-index: 3;
   background: var(--theme-color-neutral-bg-default);
   overflow: hidden;
-  outline: none;
 }
 
 /* No bar of its own, so the cards can fill the pane */

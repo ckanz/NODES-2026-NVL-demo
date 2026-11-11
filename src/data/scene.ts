@@ -40,7 +40,12 @@ export const mergeGraphs = (graphs: Iterable<DataGraph>): DataGraph => {
 };
 
 // What one click on the schema loaded.
-export type Item = { title: string; data: DataGraph };
+export type Item = {
+  title: string;
+  data: DataGraph;
+  // For a pattern's connections: the nodes they were fetched for.
+  covers?: ConnectionRequest;
+};
 
 // Never changed in place, so keeping the references is enough to restore a state later.
 export type SceneState = {
@@ -193,17 +198,20 @@ export const connectionRequests = (
   return requests;
 };
 
-const sameIds = (a: string[], b: string[]) =>
-  a.length === b.length && a.every((id, index) => id === b[index]);
+const allIn = (ids: string[], known: string[]) => {
+  const set = new Set(known);
+  return ids.every((id) => set.has(id));
+};
 
-export const sameRequest = (
+// Whether connections fetched for `a` include everything `b` needs. Fewer nodes need no new query.
+export const covers = (
   a: ConnectionRequest | undefined,
   b: ConnectionRequest,
 ) =>
   a !== undefined &&
   patternKey(a.pattern) === patternKey(b.pattern) &&
-  sameIds(a.fromIds, b.fromIds) &&
-  sameIds(a.toIds, b.toIds);
+  allIn(b.fromIds, a.fromIds) &&
+  allIn(b.toIds, a.toIds);
 
 export const countScene = ({ nodeInfo, relationships }: Scene) => {
   const labels = new Map<string, number>();
@@ -221,4 +229,122 @@ export const countScene = ({ nodeInfo, relationships }: Scene) => {
     }
   }
   return { labels, patterns };
+};
+
+// ---- Scene state helpers ----------------------------------------------------------------------------------
+
+// Keys of loaded selections and their loading state.
+export const LABEL_KEY_PREFIX = "node:";
+export const labelKey = (label: string) => `${LABEL_KEY_PREFIX}${label}`;
+export const relationshipKey = (pattern: Pattern) =>
+  `rel:${patternKey(pattern)}`;
+
+// Labels clicked in the schema, and the end labels of clicked patterns.
+export const selectedLabels = (items: ReadonlyMap<string, Item>) => {
+  const labels = new Set<string>();
+  for (const key of items.keys()) {
+    if (key.startsWith(LABEL_KEY_PREFIX))
+      labels.add(key.slice(LABEL_KEY_PREFIX.length));
+    if (key.startsWith("rel:")) {
+      const [fromLabel, , toLabel] = key.slice("rel:".length).split("|");
+      labels.add(fromLabel).add(toLabel);
+    }
+  }
+  return labels;
+};
+// All relationships of a selected pattern between on-screen nodes, kept in step with the scene.
+export const connectionKey = (pattern: Pattern) =>
+  `conn:${patternKey(pattern)}`;
+
+// A ring slice replaces the label's nodes instead of adding to them; nodes requested one by one are kept.
+export const sliceRestriction = (
+  items: ReadonlyMap<string, Item>,
+  slices: ReadonlyMap<string, Slice>,
+): SliceRestriction => {
+  const slicedLabels = new Map<string, Set<string>>();
+  for (const label of slices.keys()) {
+    const item = items.get(labelKey(label));
+    if (!item) continue;
+    const ids = new Set<string>();
+    for (const [id, info] of item.data.nodeInfo)
+      if (info.labels.includes(label)) ids.add(id);
+    slicedLabels.set(label, ids);
+  }
+  const keep = new Set<string>();
+  for (const [key, item] of items) {
+    if (key.startsWith("expand:") || key.startsWith("path:"))
+      for (const node of item.data.nodes) keep.add(node.id);
+  }
+  return { slicedLabels, keep };
+};
+
+export const patternTitle = ({ fromLabel, type, toLabel }: Pattern) =>
+  `(:${fromLabel})-[:${type}]->(:${toLabel})`;
+
+// The scene a state draws.
+export const sceneFor = (state: SceneState) =>
+  buildScene(
+    state,
+    sliceRestriction(state.items, state.slices),
+    selectedLabels(state.items),
+  );
+
+export const without = (set: ReadonlySet<string>, ids: string[]) =>
+  ids.some((id) => set.has(id))
+    ? new Set([...set].filter((id) => !ids.includes(id)))
+    : set;
+
+// The state after showing everything in `data` again.
+export const revealed = (state: SceneState, data: DataGraph): SceneState => ({
+  ...state,
+  hiddenNodes: without(
+    state.hiddenNodes,
+    data.nodes.map((node) => node.id),
+  ),
+  hiddenRelationships: without(
+    state.hiddenRelationships,
+    data.relationships.map((rel) => rel.id),
+  ),
+  hiddenLabels: without(
+    state.hiddenLabels,
+    [...data.nodeInfo.values()].flatMap((info) => info.labels),
+  ),
+});
+
+// Adds fetched connections, skipping patterns removed in the meantime.
+export const withConnections = (
+  items: ReadonlyMap<string, Item>,
+  connections: [string, Item][],
+) => {
+  const next = new Map(items);
+  for (const [key, item] of connections)
+    if (item.covers && items.has(relationshipKey(item.covers.pattern)))
+      next.set(key, item);
+  return next;
+};
+
+export const withKey = <T>(
+  set: ReadonlySet<T>,
+  key: T,
+  present: boolean,
+): ReadonlySet<T> => {
+  if (set.has(key) === present) return set;
+  const next = new Set(set);
+  if (present) next.add(key);
+  else next.delete(key);
+  return next;
+};
+
+// Per sliced label: how many of its slice's nodes are on screen (for its ring).
+export const visibleInSlices = (
+  items: ReadonlyMap<string, Item>,
+  scene: Scene,
+) => {
+  const counts = new Map<string, number>();
+  for (const [key, item] of items) {
+    if (!key.startsWith(LABEL_KEY_PREFIX)) continue;
+    const label = key.slice(LABEL_KEY_PREFIX.length);
+    counts.set(label, countVisible(item.data, scene, label));
+  }
+  return counts;
 };

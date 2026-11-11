@@ -41,7 +41,7 @@ const clamp = (value: number, low: number, high: number) =>
   Math.min(high, Math.max(low, value));
 
 // The new slice always covers 1 to maxCount nodes and stays within the label's nodes.
-export const moveSlice = (
+const moveSlice = (
   mode: DragMode,
   from: Slice,
   travelled: number, // fraction of the circle, positive is clockwise

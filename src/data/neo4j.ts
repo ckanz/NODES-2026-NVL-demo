@@ -10,8 +10,23 @@ import type {
   Relationship as Neo4jRelationship,
 } from "neo4j-driver";
 
-import { patternKey } from "./scene";
-import type { DataGraph, GraphData, NodeInfo, Pattern } from "./scene";
+import {
+  connectionKey,
+  connectionRequests,
+  covers,
+  patternKey,
+  patternTitle,
+  relationshipKey,
+  sceneFor,
+} from "./scene";
+import type {
+  DataGraph,
+  GraphData,
+  Item,
+  NodeInfo,
+  Pattern,
+  SceneState,
+} from "./scene";
 
 // ---- Connection -------------------------------------------------------------------------------------------
 
@@ -316,4 +331,37 @@ export const fetchShortestPath = async (
       "No path of up to 15 relationships connects those two nodes.",
     );
   return data;
+};
+
+/**
+ * Fetches the relationships each selected pattern needs between the nodes `state` would show, unless they are
+ * already loaded. Called before a change is applied, so new nodes arrive together with their relationships.
+ */
+export const fetchMissingConnections = async (
+  state: SceneState,
+  schema: SchemaGraph,
+  scene = sceneFor(state),
+): Promise<[string, Item][]> => {
+  const selected = [...schema.relationshipById.values()].filter((pattern) =>
+    state.items.has(relationshipKey(pattern)),
+  );
+  const missing = [...connectionRequests(scene, selected).values()].filter(
+    (request) =>
+      !covers(state.items.get(connectionKey(request.pattern))?.covers, request),
+  );
+  return Promise.all(
+    missing.map(async (request): Promise<[string, Item]> => [
+      connectionKey(request.pattern),
+      {
+        title: `connections of ${patternTitle(request.pattern)}`,
+        data: await fetchConnections(
+          request.pattern,
+          request.fromIds,
+          request.toIds,
+          schema.colorFor,
+        ),
+        covers: request,
+      },
+    ]),
+  );
 };

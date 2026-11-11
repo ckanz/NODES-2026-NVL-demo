@@ -30,8 +30,8 @@ import {
 } from "./utils/format";
 import {
   defaultSlice,
-  fetchConnections,
   fetchLabel,
+  fetchMissingConnections,
   fetchNeighbours,
   fetchRelationship,
   fetchSchema,
@@ -40,78 +40,25 @@ import {
 } from "./data/neo4j";
 import type { SchemaGraph, Slice } from "./data/neo4j";
 import {
-  buildScene,
+  connectionKey,
+  countScene,
+  isFullyVisible,
+  labelKey,
   mergeGraphs,
   patternKey,
-  connectionRequests,
-  countScene,
-  countVisible,
-  isFullyVisible,
-  sameRequest,
+  patternTitle,
+  relationshipKey,
+  revealed,
+  sceneFor,
+  visibleInSlices,
+  withConnections,
+  withKey,
+  without,
 } from "./data/scene";
-import type {
-  ConnectionRequest,
-  DataGraph,
-  GraphData,
-  Item,
-  Pattern,
-  SceneState,
-  SliceRestriction,
-} from "./data/scene";
+import type { DataGraph, GraphData, Item, SceneState } from "./data/scene";
 import type { ScribbleResult } from "./interactions/scribble";
 import type { Snapshot } from "./hooks/useHistory";
 import { useHistory } from "./hooks/useHistory";
-
-// Keys of loaded selections and their loading state.
-const LABEL_KEY_PREFIX = "node:";
-const labelKey = (label: string) => `${LABEL_KEY_PREFIX}${label}`;
-const relationshipKey = (pattern: Pattern) => `rel:${patternKey(pattern)}`;
-
-// Labels clicked in the schema, and the end labels of clicked patterns.
-const selectedLabels = (items: ReadonlyMap<string, Item>) => {
-  const labels = new Set<string>();
-  for (const key of items.keys()) {
-    if (key.startsWith(LABEL_KEY_PREFIX))
-      labels.add(key.slice(LABEL_KEY_PREFIX.length));
-    if (key.startsWith("rel:")) {
-      const [fromLabel, , toLabel] = key.slice("rel:".length).split("|");
-      labels.add(fromLabel).add(toLabel);
-    }
-  }
-  return labels;
-};
-// All relationships of a selected pattern between on-screen nodes, kept in step with the scene.
-const CONNECTION_KEY_PREFIX = "conn:";
-const connectionKey = (pattern: Pattern) =>
-  `${CONNECTION_KEY_PREFIX}${patternKey(pattern)}`;
-
-// A ring slice replaces the label's nodes instead of adding to them; nodes requested one by one are kept.
-const sliceRestriction = (
-  items: ReadonlyMap<string, Item>,
-  slices: ReadonlyMap<string, Slice>,
-): SliceRestriction => {
-  const slicedLabels = new Map<string, Set<string>>();
-  for (const label of slices.keys()) {
-    const item = items.get(labelKey(label));
-    if (!item) continue;
-    const ids = new Set<string>();
-    for (const [id, info] of item.data.nodeInfo)
-      if (info.labels.includes(label)) ids.add(id);
-    slicedLabels.set(label, ids);
-  }
-  const keep = new Set<string>();
-  for (const [key, item] of items) {
-    if (key.startsWith("expand:") || key.startsWith("path:"))
-      for (const node of item.data.nodes) keep.add(node.id);
-  }
-  return { slicedLabels, keep };
-};
-
-const patternTitle = ({ fromLabel, type, toLabel }: Pattern) =>
-  `(:${fromLabel})-[:${type}]->(:${toLabel})`;
-
-// How long the scene must stay still before connections are looked up again.
-const CONNECTION_SYNC_DELAY_MS = 150;
 
 // NVL's default min zoom (0.075) is too tight for tens of thousands of nodes, and fit() stops there too.
 const DATA_MIN_ZOOM = 0.001;
@@ -123,18 +70,6 @@ const SCHEMA_CAPTION_SIZE = 3.5;
 
 const errorMessage = (e: unknown) =>
   e instanceof Error ? e.message : String(e);
-
-const withKey = <T,>(
-  set: ReadonlySet<T>,
-  key: T,
-  present: boolean,
-): ReadonlySet<T> => {
-  if (set.has(key) === present) return set;
-  const next = new Set(set);
-  if (present) next.add(key);
-  else next.delete(key);
-  return next;
-};
 
 const SpinnerFill = () => (
   <Flex alignItems="center" justifyContent="center" style={{ height: "100%" }}>
@@ -209,26 +144,22 @@ export const App = () => {
   // ---- The data graph --------------------------------------------------------------------------------------
   const scene = useMemo(
     () =>
-      buildScene(
-        { items, hiddenLabels, hiddenNodes, hiddenRelationships },
-        sliceRestriction(items, slices),
-        selectedLabels(items),
-      ),
+      sceneFor({
+        items,
+        hiddenLabels,
+        hiddenNodes,
+        hiddenRelationships,
+        slices,
+      }),
     [items, hiddenLabels, hiddenNodes, hiddenRelationships, slices],
   );
   const sceneRef = useRef(scene);
   sceneRef.current = scene;
   const sceneCounts = useMemo(() => countScene(scene), [scene]);
-  // Per sliced label: how many of its slice's nodes are on screen (for its ring).
-  const visibleInSlices = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const [key, item] of items) {
-      if (!key.startsWith(LABEL_KEY_PREFIX)) continue;
-      const label = key.slice(LABEL_KEY_PREFIX.length);
-      counts.set(label, countVisible(item.data, scene, label));
-    }
-    return counts;
-  }, [items, scene]);
+  const slicesOnScreen = useMemo(
+    () => visibleInSlices(items, scene),
+    [items, scene],
+  );
   const sceneCountsRef = useRef(sceneCounts);
   sceneCountsRef.current = sceneCounts;
   const countsRef = useRef({ nodes: 0, relationships: 0 });
@@ -261,53 +192,114 @@ export const App = () => {
     [schema],
   );
 
-  const showLabels = useCallback((labels: string[]) => {
-    setHiddenLabels((current) => {
-      if (!labels.some((label) => current.has(label))) return current;
-      const next = new Set(current);
-      for (const label of labels) next.delete(label);
-      return next;
-    });
-  }, []);
+  const showLabels = useCallback(
+    (labels: string[]) =>
+      setHiddenLabels((current) => without(current, labels)),
+    [],
+  );
 
   // Bumped by Clear and restore, so queries started earlier drop their results.
   const generation = useRef(0);
-  // Last connection lookup started per selected pattern (by patternKey).
-  const connectionRequestsRef = useRef(new Map<string, ConnectionRequest>());
 
-  // No-op if already loaded or loading. `unhide` labels are shown and `onArrive` runs when the data arrives.
+  // The user asked for this data, so anything in it they had hidden comes back.
+  const revealAll = useCallback(
+    (data: DataGraph) => {
+      setHiddenNodes((current) =>
+        without(
+          current,
+          data.nodes.map((node) => node.id),
+        ),
+      );
+      setHiddenRelationships((current) =>
+        without(
+          current,
+          data.relationships.map((rel) => rel.id),
+        ),
+      );
+      showLabels([...data.nodeInfo.values()].flatMap((info) => info.labels));
+    },
+    [showLabels],
+  );
+
+  // Shows hidden nodes after fetching the relationships they need, so both appear together.
+  const showWithConnections = useCallback(
+    (loadingKey: string, next: SceneState, apply: () => void) => {
+      const currentSchema = schemaRef.current;
+      if (!currentSchema) return;
+      const started = generation.current;
+      setLoading(loadingKey, true);
+      fetchMissingConnections(next, currentSchema)
+        .then((connections) => {
+          if (started !== generation.current) return;
+          apply();
+          setItems((current) => withConnections(current, connections));
+        })
+        .catch(
+          (e: unknown) =>
+            started === generation.current && setError(errorMessage(e)),
+        )
+        .finally(
+          () => started === generation.current && setLoading(loadingKey, false),
+        );
+    },
+    [setLoading],
+  );
+
+  // No-op if already loaded or loading. `unhide` labels are shown, and with `reveal` anything hidden in the data.
+  // The data is applied together with the relationships selected patterns need for it.
   const addItem = useCallback(
     (
       key: string,
       title: string,
       load: () => Promise<DataGraph>,
       unhide: string[] = [],
-      onArrive?: (data: DataGraph) => void,
+      reveal = false,
     ) => {
-      if (loadingRef.current.has(key) || sceneStateRef.current.items.has(key))
+      const currentSchema = schemaRef.current;
+      if (
+        !currentSchema ||
+        loadingRef.current.has(key) ||
+        sceneStateRef.current.items.has(key)
+      )
         return;
       const started = generation.current;
       const stillCurrent = () => started === generation.current;
       setError(null);
       setLoading(key, true);
       load()
-        .then((data) => {
+        .then(async (data) => {
+          if (!stillCurrent()) return;
+          const state = sceneStateRef.current;
+          let next: SceneState = {
+            ...state,
+            items: new Map(state.items).set(key, { title, data }),
+            hiddenLabels: without(state.hiddenLabels, unhide),
+          };
+          if (reveal) next = revealed(next, data);
+          const connections = await fetchMissingConnections(
+            next,
+            currentSchema,
+          );
           if (!stillCurrent()) return;
           record(`Add ${title}`);
           showLabels(unhide);
-          onArrive?.(data);
-          setItems((current) => new Map(current).set(key, { title, data }));
+          if (reveal) revealAll(data);
+          setItems((current) =>
+            withConnections(
+              new Map(current).set(key, { title, data }),
+              connections,
+            ),
+          );
         })
         .catch((e: unknown) => stillCurrent() && setError(errorMessage(e)))
         .finally(() => stillCurrent() && setLoading(key, false));
     },
-    [record, showLabels, setLoading],
+    [record, showLabels, revealAll, setLoading],
   );
 
   const clearAll = useCallback(() => {
     record("Clear");
     generation.current += 1;
-    connectionRequestsRef.current.clear();
     setItems(new Map());
     setLoadingKeys(new Set());
     setHiddenLabels(new Set());
@@ -316,26 +308,6 @@ export const App = () => {
     setSlices(new Map());
     setError(null);
   }, [record]);
-
-  // The user asked for this data, so anything in it they had hidden comes back.
-  const revealAll = useCallback(
-    (data: DataGraph) => {
-      const nodeIds = new Set(data.nodes.map((node) => node.id));
-      const relationshipIds = new Set(data.relationships.map((rel) => rel.id));
-      setHiddenNodes((current) =>
-        data.nodes.some((node) => current.has(node.id))
-          ? new Set([...current].filter((id) => !nodeIds.has(id)))
-          : current,
-      );
-      setHiddenRelationships((current) =>
-        data.relationships.some((rel) => current.has(rel.id))
-          ? new Set([...current].filter((id) => !relationshipIds.has(id)))
-          : current,
-      );
-      showLabels([...data.nodeInfo.values()].flatMap((info) => info.labels));
-    },
-    [showLabels],
-  );
 
   // ---- Schema clicks ---------------------------------------------------------------------------------------
 
@@ -350,8 +322,15 @@ export const App = () => {
         (sceneStateRef.current.items.has(labelKey(label)) ||
           (sceneCountsRef.current.labels.get(label) ?? 0) > 0)
       ) {
-        record(`Show (:${label})`);
-        showLabels([label]);
+        const state = sceneStateRef.current;
+        showWithConnections(
+          `show:${label}`,
+          { ...state, hiddenLabels: without(state.hiddenLabels, [label]) },
+          () => {
+            record(`Show (:${label})`);
+            showLabels([label]);
+          },
+        );
         return;
       }
       if ((sceneCountsRef.current.labels.get(label) ?? 0) > 0) {
@@ -359,14 +338,8 @@ export const App = () => {
         setHiddenLabels((current) => withKey(current, label, true));
         return;
       }
-      // Loaded before and only hidden: show again without a query.
-      if (sceneStateRef.current.items.has(labelKey(label))) {
-        if (sceneStateRef.current.hiddenLabels.has(label)) {
-          record(`Show (:${label})`);
-          showLabels([label]);
-        }
-        return;
-      }
+      // Loaded, but none of it on screen (all dismissed): nothing to add.
+      if (sceneStateRef.current.items.has(labelKey(label))) return;
       addItem(
         labelKey(label),
         `(:${label})`,
@@ -374,7 +347,7 @@ export const App = () => {
         [label],
       );
     },
-    [schema, addItem, record, showLabels, sliceFor],
+    [schema, addItem, record, showLabels, showWithConnections, sliceFor],
   );
 
   // Adds or removes a pattern. A partly hidden pattern is shown in full first, so a click never removes
@@ -396,13 +369,15 @@ export const App = () => {
           (connections?.relationships.some((rel) => dismissed.has(rel.id)) ??
             false);
         if (partlyHidden) {
-          record(`Show ${loaded.title}`);
-          revealAll(
-            connections ? mergeGraphs([loaded.data, connections]) : loaded.data,
-          );
+          const all = connections
+            ? mergeGraphs([loaded.data, connections])
+            : loaded.data;
+          showWithConnections(key, revealed(sceneStateRef.current, all), () => {
+            record(`Show ${loaded.title}`);
+            revealAll(all);
+          });
         } else {
           record(`Remove ${loaded.title}`);
-          connectionRequestsRef.current.delete(patternKey(pattern));
           setItems((current) => {
             const next = new Map(current);
             next.delete(key);
@@ -419,81 +394,45 @@ export const App = () => {
         [pattern.fromLabel, pattern.toLabel],
       );
     },
-    [schema, addItem, record, revealAll],
+    [schema, addItem, record, revealAll, showWithConnections],
   );
 
-  // ---- Connections of selected patterns --------------------------------------------------------------------
-
-  // Running connection lookups only show the small spinner; the graph stays usable.
-  const [syncingConnections, setSyncingConnections] = useState(0);
-
-  // Once the scene settles, re-query selected patterns whose end nodes changed. Lookups return relationships
-  // only, so they never add nodes and cannot retrigger themselves.
+  // Changes that add nodes fetch their relationships first (see addItem). This only catches two loads that
+  // overlapped, where neither could know about the other's nodes. Normally it finds nothing missing.
   useEffect(() => {
     if (!schema) return;
-    const timer = setTimeout(() => {
-      const selected = [...schema.relationshipById.values()].filter((pattern) =>
-        items.has(relationshipKey(pattern)),
-      );
-      const requests = connectionRequests(scene, selected);
-
-      // Drop patterns no longer selected or with nothing on screen at one end.
-      const stale = [...connectionRequestsRef.current.keys()].filter(
-        (key) => !requests.has(key),
-      );
-      for (const key of stale) connectionRequestsRef.current.delete(key);
-      const staleItems = [...items.keys()].filter(
-        (key) =>
-          key.startsWith(CONNECTION_KEY_PREFIX) &&
-          !requests.has(key.slice(CONNECTION_KEY_PREFIX.length)),
-      );
-      if (staleItems.length > 0) {
-        setItems((current) => {
-          const next = new Map(current);
-          for (const key of staleItems) next.delete(key);
-          return next;
-        });
-      }
-
-      const started = generation.current;
-      for (const [key, request] of requests) {
-        if (sameRequest(connectionRequestsRef.current.get(key), request))
-          continue;
-        connectionRequestsRef.current.set(key, request);
-        // Only the latest lookup for a pattern may land, and none from before a Clear or a restore.
-        const isLatest = () =>
-          connectionRequestsRef.current.get(key) === request &&
-          started === generation.current;
-        setSyncingConnections((count) => count + 1);
-        fetchConnections(
-          request.pattern,
-          request.fromIds,
-          request.toIds,
-          schema.colorFor,
+    const state = {
+      items,
+      hiddenLabels,
+      hiddenNodes,
+      hiddenRelationships,
+      slices,
+    };
+    const started = generation.current;
+    let cancelled = false;
+    fetchMissingConnections(state, schema, scene)
+      .then((connections) => {
+        if (
+          cancelled ||
+          started !== generation.current ||
+          connections.length === 0
         )
-          .then((data) => {
-            if (!isLatest()) return;
-            setItems((current) =>
-              // The pattern may have been removed while this ran.
-              current.has(relationshipKey(request.pattern))
-                ? new Map(current).set(connectionKey(request.pattern), {
-                    title: `connections of ${patternTitle(request.pattern)}`,
-                    data,
-                  })
-                : current,
-            );
-          })
-          .catch((e: unknown) => {
-            if (!isLatest()) return;
-            // Forget it so the next scene change retries.
-            connectionRequestsRef.current.delete(key);
-            setError(errorMessage(e));
-          })
-          .finally(() => setSyncingConnections((count) => count - 1));
-      }
-    }, CONNECTION_SYNC_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [schema, items, scene]);
+          return;
+        setItems((current) => withConnections(current, connections));
+      })
+      .catch((e: unknown) => !cancelled && setError(errorMessage(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    schema,
+    items,
+    hiddenLabels,
+    hiddenNodes,
+    hiddenRelationships,
+    slices,
+    scene,
+  ]);
 
   // Only the latest slice request per label may land, so a slow one cannot overwrite a newer one.
   const sliceRequests = useRef(new Map<string, number>());
@@ -525,13 +464,20 @@ export const App = () => {
       setError(null);
       setLoading(key, true);
       fetchLabel(label, schema.colorFor, slice, visiblePatterns)
-        .then((data) => {
+        .then(async (data) => {
+          if (!isLatest()) return;
+          const state = sceneStateRef.current;
+          const item = {
+            title: state.items.get(key)?.title ?? `(:${label})`,
+            data,
+          };
+          const connections = await fetchMissingConnections(
+            { ...state, items: new Map(state.items).set(key, item) },
+            schema,
+          );
           if (!isLatest()) return;
           setItems((current) =>
-            new Map(current).set(key, {
-              title: current.get(key)?.title ?? `(:${label})`,
-              data,
-            }),
+            withConnections(new Map(current).set(key, item), connections),
           );
         })
         .catch((e: unknown) => {
@@ -557,7 +503,6 @@ export const App = () => {
       // Record the current state so going back can be undone.
       record(`Before going back to "${snapshot.reason}"`);
       generation.current += 1; // drop results of queries still running
-      connectionRequestsRef.current.clear();
       setItems(snapshot.items);
       setHiddenLabels(snapshot.hiddenLabels);
       setHiddenNodes(snapshot.hiddenNodes);
@@ -592,10 +537,10 @@ export const App = () => {
         title,
         () => fetchNeighbours(node.id, currentSchema.colorFor),
         [],
-        revealAll,
+        true,
       );
     },
-    [record, addItem, removeItem, revealAll],
+    [record, addItem, removeItem],
   );
 
   const applyScribbles = useCallback(
@@ -628,11 +573,11 @@ export const App = () => {
           `shortest path ${caption(from)} to ${caption(to)}`,
           () => fetchShortestPath(from, to, currentSchema.colorFor),
           [],
-          revealAll,
+          true,
         );
       }
     },
-    [record, addItem, revealAll],
+    [record, addItem],
   );
 
   // ---- Scribble mode ---------------------------------------------------------------------------------------
@@ -719,9 +664,7 @@ export const App = () => {
             {scene.overCap > 0 &&
               ` (limit reached, ${formatCount(scene.overCap)} not shown)`}
           </Typography>
-          {(loadingKeys.size > 0 || syncingConnections > 0) && (
-            <LoadingSpinner size="small" />
-          )}
+          {loadingKeys.size > 0 && <LoadingSpinner size="small" />}
           <div className="app-header-actions">
             <OutlinedButton
               variant={scribbling ? "primary" : "neutral"}
@@ -794,7 +737,7 @@ export const App = () => {
                   nodeSize={SCHEMA_NODE_SIZE}
                   selected={(sceneCounts.labels.get(label) ?? 0) > 0}
                   slice={ringSliceFor(label)}
-                  visibleInSlice={visibleInSlices.get(label)}
+                  visibleInSlice={slicesOnScreen.get(label)}
                   maxCount={Math.min(connected, MAX_SLICE)}
                   onSliceChange={(slice) => changeSlice(label, slice)}
                 />,

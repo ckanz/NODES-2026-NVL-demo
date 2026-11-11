@@ -122,7 +122,7 @@
 
 /* Schema node overlays. NVL scales them with the zoom, so sizes are in graph units, not screen pixels. */
 .app {
-  /* Deliberately not a theme token: Needle's danger color is too quiet for this. */
+  /* Scribble lines. Deliberately not a theme token: Needle's danger color is too quiet for this. */
   --stat-accent: #ff1a2e;
   --stat-halo: var(--theme-color-neutral-bg-weak);
 }
@@ -163,13 +163,12 @@
 
 .stat-ring-track {
   fill: none;
-  stroke: var(--theme-color-neutral-border-strong);
-  opacity: 0.35;
+  stroke: var(--theme-color-neutral-bg-strong);
 }
 
 .stat-ring-arc {
   fill: none;
-  stroke: var(--stat-accent);
+  stroke: var(--theme-color-primary-bg-strong);
 }
 
 /* Faint slice; the part on screen is drawn solid on top. */
@@ -188,8 +187,8 @@
 
 .stat-handle {
   fill: var(--theme-color-neutral-bg-weak);
-  stroke: var(--stat-accent);
-  stroke-width: 5;
+  stroke: var(--theme-color-primary-bg-strong);
+  stroke-width: 6;
   pointer-events: none;
 }
 

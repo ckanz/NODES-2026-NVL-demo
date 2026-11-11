@@ -28,8 +28,8 @@ type DragMode = "shift" | "start" | "end";
 
 // Graph units: NVL scales the overlay with the zoom.
 const RING_GAP = 12;
-const RING_WIDTH = 12;
-const HANDLE_RADIUS = 12;
+const RING_WIDTH = 6;
+const HANDLE_RADIUS = 14;
 const HIT_WIDTH = 44;
 const HANDLE_HIT_RADIUS = 30;
 

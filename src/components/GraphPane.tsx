@@ -28,8 +28,6 @@ export type GraphSnapshot = ViewState & {
 export type GraphPaneHandle = {
   /** Null if NVL has not started. */
   capture: () => GraphSnapshot | null;
-  undoScribble: () => void;
-  discardScribbles: () => void;
 };
 
 type GraphPaneProps = {
@@ -122,8 +120,6 @@ export const GraphPane = ({
   useImperativeHandle(
     ref,
     () => ({
-      undoScribble: scribbles.undo,
-      discardScribbles: scribbles.discard,
       capture: () => {
         const nvl = nvlRef.current;
         if (!nvl) return null;
@@ -139,8 +135,6 @@ export const GraphPane = ({
         };
       },
     }),
-    // The scribble functions only touch refs, so the first ones stay valid.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 

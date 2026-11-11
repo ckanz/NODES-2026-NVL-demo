@@ -246,10 +246,5 @@ export const useScribbles = ({
       enabled && active ? (
         <div ref={gridRef} className="scribble-grid" aria-hidden="true" />
       ) : null,
-    undo: () => setStrokes(strokes.current.slice(0, -1)),
-    discard: () => {
-      currentStroke.current = null;
-      setStrokes([]);
-    },
   };
 };

@@ -6,6 +6,7 @@ import {
   countScene,
   countVisible,
   isFullyVisible,
+  MAX_SCENE_NODES,
   sameRequest,
   mergeGraphs,
   patternKey,
@@ -75,6 +76,45 @@ describe("buildScene", () => {
     expect(
       ids(buildScene({ items, ...nothingHidden }, kept).relationships),
     ).toEqual(["r1", "r2"]);
+  });
+
+  it("keeps a node with a hidden label if another of its labels is selected", () => {
+    const hidden = { ...nothingHidden, hiddenLabels: new Set(["Internal"]) };
+    const kept = buildScene(
+      { items, ...hidden },
+      undefined,
+      new Set(["Account"]),
+    );
+    expect(kept.nodeInfo.has("a1")).toBe(true);
+    // Hiding the selected label too drops it.
+    const both = { ...hidden, hiddenLabels: new Set(["Internal", "Account"]) };
+    expect(
+      buildScene(
+        { items, ...both },
+        undefined,
+        new Set(["Account"]),
+      ).nodeInfo.has("a1"),
+    ).toBe(false);
+  });
+
+  it("draws at most MAX_SCENE_NODES nodes, keeping the first loaded", () => {
+    const many: DataGraph = {
+      nodes: Array.from({ length: MAX_SCENE_NODES + 2 }, (_, i) => ({
+        id: `n${i}`,
+      })),
+      relationships: [
+        { id: "last", from: "n0", to: `n${MAX_SCENE_NODES + 1}` },
+      ],
+      nodeInfo: new Map(),
+    };
+    const scene = buildScene({
+      items: new Map([["many", { title: "", data: many }]]),
+      ...nothingHidden,
+    });
+    expect(scene.nodes).toHaveLength(MAX_SCENE_NODES);
+    expect(scene.overCap).toBe(2);
+    expect(scene.nodeById.has("n0")).toBe(true);
+    expect(scene.relationships).toEqual([]);
   });
 
   it("drops dismissed nodes and relationships", () => {

@@ -53,7 +53,14 @@ export type SceneState = {
   slices: ReadonlyMap<string, Slice>;
 };
 
-export type Scene = DataGraph & { nodeById: Map<string, Node> };
+// Most nodes drawn at once. Beyond it, the most recently loaded nodes are left out.
+export const MAX_SCENE_NODES = 30_000;
+
+export type Scene = DataGraph & {
+  nodeById: Map<string, Node>;
+  // Nodes left out because of MAX_SCENE_NODES.
+  overCap: number;
+};
 
 /**
  * Labels sliced with the ring, with their slice's nodes. Other nodes of those labels are not drawn unless `keep`
@@ -87,7 +94,15 @@ export const buildScene = (
     hiddenRelationships,
   }: Omit<SceneState, "slices">,
   restriction?: SliceRestriction,
+  // Labels the user selected. A node with a hidden label stays if it also has one of these that isn't hidden.
+  selectedLabels: ReadonlySet<string> = new Set(),
 ): Scene => {
+  const hiddenByLabel = (labels: string[]) =>
+    labels.some((label) => hiddenLabels.has(label)) &&
+    !labels.some(
+      (label) => selectedLabels.has(label) && !hiddenLabels.has(label),
+    );
+
   const merged = mergeGraphs([...items.values()].map((item) => item.data));
   const nodeInfo = new Map(merged.nodeInfo);
   const nodeById = new Map(merged.nodes.map((node) => [node.id, node]));
@@ -95,7 +110,7 @@ export const buildScene = (
   for (const [id, info] of nodeInfo) {
     if (
       hiddenNodes.has(id) ||
-      info.labels.some((label) => hiddenLabels.has(label)) ||
+      hiddenByLabel(info.labels) ||
       (restriction && outsideSlices(id, info.labels, restriction))
     ) {
       nodeById.delete(id);
@@ -104,13 +119,26 @@ export const buildScene = (
   }
   for (const id of hiddenNodes) nodeById.delete(id);
 
+  // Map order is load order, so the oldest nodes are kept.
+  const overCap = Math.max(0, nodeById.size - MAX_SCENE_NODES);
+  for (const id of [...nodeById.keys()].slice(MAX_SCENE_NODES)) {
+    nodeById.delete(id);
+    nodeInfo.delete(id);
+  }
+
   const relationships = merged.relationships.filter(
     (rel) =>
       !hiddenRelationships.has(rel.id) &&
       nodeById.has(rel.from) &&
       nodeById.has(rel.to),
   );
-  return { nodes: [...nodeById.values()], relationships, nodeInfo, nodeById };
+  return {
+    nodes: [...nodeById.values()],
+    relationships,
+    nodeInfo,
+    nodeById,
+    overCap,
+  };
 };
 
 // A selection can be loaded but partly hidden, by a removed label or dismissed elements.

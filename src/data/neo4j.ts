@@ -209,7 +209,7 @@ export const fetchSchema = async (): Promise<SchemaGraph> => {
 // Cap for a pattern click or a node expansion.
 const QUERY_LIMIT = 1000;
 // Largest slice the ring can select. Guards the browser, not the database.
-export const MAX_SLICE = 50_000;
+export const MAX_SLICE = 30_000;
 
 export type Slice = { skip: number; count: number };
 

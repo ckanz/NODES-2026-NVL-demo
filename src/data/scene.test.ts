@@ -63,6 +63,20 @@ describe("buildScene", () => {
     expect(scene.nodeInfo.has("a1")).toBe(false);
   });
 
+  it("draws only the set slice of a label, plus nodes kept on purpose", () => {
+    const restriction = {
+      slicedLabels: new Map([["Customer", new Set(["c2"])]]),
+      keep: new Set<string>(),
+    };
+    expect(
+      ids(buildScene({ items, ...nothingHidden }, restriction).nodes),
+    ).toEqual(["a1", "c2", "e1"]);
+    const kept = { ...restriction, keep: new Set(["c1"]) };
+    expect(
+      ids(buildScene({ items, ...nothingHidden }, kept).relationships),
+    ).toEqual(["r1", "r2"]);
+  });
+
   it("drops dismissed nodes and relationships", () => {
     const scene = buildScene({
       items,

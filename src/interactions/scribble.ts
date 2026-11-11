@@ -187,7 +187,7 @@ const crossesRelationship = (
  * - a line from one node to another: find the shortest path between them
  * - a stroke through a node or relationship: dismiss it
  * - a circle around some nodes, then a stroke through the circle: dismiss every node inside it
- * A circle on its own does nothing yet, and stays on screen for a later stroke to cross.
+ * A circle on its own does nothing: it only counts when a stroke in the same session crosses it.
  */
 export const analyseScribbles = (
   strokes: Stroke[],

@@ -5,6 +5,7 @@ import {
   LoadingSpinner,
   Logo,
   OutlinedButton,
+  TextLink,
   Typography,
 } from "@neo4j-ndl/react";
 import {
@@ -48,7 +49,7 @@ import {
   isFullyVisible,
   sameRequest,
 } from "./data/scene";
-import type { ConnectionRequest } from "./data/scene";
+import type { ConnectionRequest, SliceRestriction } from "./data/scene";
 import type { ScribbleResult } from "./interactions/scribble";
 import type { Item, SceneState, Snapshot } from "./data/snapshots";
 import { useHistory } from "./hooks/useHistory";
@@ -62,6 +63,31 @@ const relationshipKey = (pattern: Pattern) => `rel:${patternKey(pattern)}`;
 const CONNECTION_KEY_PREFIX = "conn:";
 const connectionKey = (pattern: Pattern) =>
   `${CONNECTION_KEY_PREFIX}${patternKey(pattern)}`;
+
+/**
+ * A slice set with the ring replaces the label's nodes instead of adding to them: only the nodes in that slice are
+ * drawn, plus those the user asked for one by one (expanding a node, a shortest path). Other queries stay additive.
+ */
+const sliceRestriction = (
+  items: ReadonlyMap<string, Item>,
+  slices: ReadonlyMap<string, Slice>,
+): SliceRestriction => {
+  const slicedLabels = new Map<string, Set<string>>();
+  for (const label of slices.keys()) {
+    const item = items.get(labelKey(label));
+    if (!item) continue;
+    const ids = new Set<string>();
+    for (const [id, info] of item.data.nodeInfo)
+      if (info.labels.includes(label)) ids.add(id);
+    slicedLabels.set(label, ids);
+  }
+  const keep = new Set<string>();
+  for (const [key, item] of items) {
+    if (key.startsWith("expand:") || key.startsWith("path:"))
+      for (const node of item.data.nodes) keep.add(node.id);
+  }
+  return { slicedLabels, keep };
+};
 
 /** How a pattern reads to the user, e.g. in history: (:From)-[:TYPE]->(:To). */
 const patternTitle = ({ fromLabel, type, toLabel }: Pattern) =>
@@ -168,8 +194,12 @@ export const App = () => {
 
   // ---- The data graph --------------------------------------------------------------------------------------
   const scene = useMemo(
-    () => buildScene({ items, hiddenLabels, hiddenNodes, hiddenRelationships }),
-    [items, hiddenLabels, hiddenNodes, hiddenRelationships],
+    () =>
+      buildScene(
+        { items, hiddenLabels, hiddenNodes, hiddenRelationships },
+        sliceRestriction(items, slices),
+      ),
+    [items, hiddenLabels, hiddenNodes, hiddenRelationships, slices],
   );
   const sceneRef = useRef(scene);
   sceneRef.current = scene;
@@ -687,191 +717,203 @@ export const App = () => {
 
   return (
     <div className="app ndl-theme-light">
-      <section className="pane pane-left">
-        <div className="graph-fullscreen">
-          {schemaView ? (
-            // Selection is driven by what is loaded, so NVL's own select-on-click is off. The schema has
-            // captions (labels and types), so it uses the Canvas renderer.
-            <GraphPane
-              data={schemaView}
-              instanceId="schema"
-              renderer="canvas"
-              layout="hierarchical"
-              selectOnClick={false}
-              onNodeClick={onSchemaNodeClick}
-              onRelationshipClick={onSchemaRelationshipClick}
-            />
-          ) : (
-            !error && <SpinnerFill />
-          )}
+      <header className="app-header">
+        <div className="app-header-half">
+          <Logo type="icon" color="color" style={{ height: 24 }} />
+          <Typography variant="title-4">Schema</Typography>
+          <Typography variant="body-medium" className="text-neutral-text-weak">
+            {schema
+              ? `${schema.nodes.length} labels, ${schema.relationships.length} relationship patterns`
+              : "Loading schema"}
+          </Typography>
         </div>
-
-        {schema &&
-          schema.nodes.map((node) => {
-            const label = schema.labelById.get(node.id) ?? "";
-            const connected = schema.totals.connected.get(label) ?? 0;
-            return createPortal(
-              <StatOverlay
-                title={label}
-                inScene={sceneCounts.labels.get(label) ?? 0}
-                total={schema.totals.labels.get(label) ?? 0}
-                sliceTotal={connected}
-                nodeSize={SCHEMA_NODE_SIZE}
-                selected={(sceneCounts.labels.get(label) ?? 0) > 0}
-                slice={ringSliceFor(label)}
-                visibleInSlice={visibleInSlices.get(label)}
-                maxCount={Math.min(connected, MAX_SLICE)}
-                onSliceChange={(slice) => changeSlice(label, slice)}
-              />,
-              overlayFor(node.id),
-              node.id,
-            );
-          })}
-
-        <Box padding="16" borderRadius="xl" className="panel panel-title">
-          <Flex gap="4">
-            <Flex flexDirection="row" alignItems="center" gap="12">
-              <Logo type="icon" color="color" style={{ height: 28 }} />
-              <Typography variant="title-3">Schema</Typography>
-            </Flex>
-            <Typography
-              variant="body-medium"
-              className="text-neutral-text-weak"
+        <div className="app-header-half app-header-data">
+          <Typography variant="title-4">Data</Typography>
+          <Typography variant="body-medium" className="text-neutral-text-weak">
+            {formatGraphSummary(scene.nodes.length, scene.relationships.length)}
+          </Typography>
+          {(loadingKeys.size > 0 || syncingConnections > 0) && (
+            <LoadingSpinner size="small" />
+          )}
+          <div className="app-header-actions">
+            <OutlinedButton
+              variant={scribbling ? "primary" : "neutral"}
+              size="small"
+              isDisabled={!scribbling && !canScribble}
+              leadingVisual={
+                scribbling ? <CheckIconOutline /> : <PencilIconOutline />
+              }
+              onClick={() => setScribbling((on) => !on)}
             >
-              {schema
-                ? `${schema.nodes.length} labels, ${schema.relationships.length} relationship patterns`
-                : "Loading schema"}
-            </Typography>
-          </Flex>
-        </Box>
-      </section>
+              {scribbling ? "Done (S)" : "Scribble (S)"}
+            </OutlinedButton>
+            <OutlinedButton
+              variant="neutral"
+              size="small"
+              isDisabled={
+                history.snapshots.length === 0 ||
+                scribbling ||
+                !!history.nowCard
+              }
+              leadingVisual={<ClockIconOutline />}
+              onClick={history.open}
+            >
+              {`History (${history.snapshots.length})`}
+            </OutlinedButton>
+            <OutlinedButton
+              variant="neutral"
+              size="small"
+              isDisabled={
+                (isEmpty && loadingKeys.size === 0) || !!history.nowCard
+              }
+              leadingVisual={<TrashIconOutline />}
+              onClick={clearAll}
+            >
+              Clear
+            </OutlinedButton>
+          </div>
+        </div>
+      </header>
 
-      <section className="pane pane-right">
-        <div className="graph-fullscreen">
-          {/* NVL may only start once the minimap element exists. The graph is unmounted while empty: NVL's WebGL
+      <div className="app-body">
+        <section className="pane pane-left">
+          <div className="graph-fullscreen">
+            {schemaView ? (
+              // Selection is driven by what is loaded, so NVL's own select-on-click is off. The schema has
+              // captions (labels and types), so it uses the Canvas renderer.
+              <GraphPane
+                data={schemaView}
+                instanceId="schema"
+                renderer="canvas"
+                layout="hierarchical"
+                selectOnClick={false}
+                onNodeClick={onSchemaNodeClick}
+                onRelationshipClick={onSchemaRelationshipClick}
+              />
+            ) : (
+              !error && <SpinnerFill />
+            )}
+          </div>
+
+          {schema &&
+            schema.nodes.map((node) => {
+              const label = schema.labelById.get(node.id) ?? "";
+              const connected = schema.totals.connected.get(label) ?? 0;
+              return createPortal(
+                <StatOverlay
+                  title={label}
+                  inScene={sceneCounts.labels.get(label) ?? 0}
+                  total={schema.totals.labels.get(label) ?? 0}
+                  sliceTotal={connected}
+                  nodeSize={SCHEMA_NODE_SIZE}
+                  selected={(sceneCounts.labels.get(label) ?? 0) > 0}
+                  slice={ringSliceFor(label)}
+                  visibleInSlice={visibleInSlices.get(label)}
+                  maxCount={Math.min(connected, MAX_SLICE)}
+                  onSliceChange={(slice) => changeSlice(label, slice)}
+                />,
+                overlayFor(node.id),
+                node.id,
+              );
+            })}
+        </section>
+
+        <section className="pane pane-right">
+          <div className="graph-fullscreen">
+            {/* NVL may only start once the minimap element exists. The graph is unmounted while empty: NVL's WebGL
               renderer does not redraw after its last nodes are removed, so the old picture would stay on screen.
               A fresh instance is created when data arrives. */}
-          {isEmpty ? null : minimapEl ? (
-            <GraphPane
-              key={graphKey}
-              ref={dataPaneRef}
-              restore={restoreView}
-              onRestored={() => setRestoreView(null)}
-              scribble={scribbling}
-              onScribbleDone={applyScribbles}
-              onNodeDoubleClick={onDataNodeDoubleClick}
-              data={scene}
-              instanceId="data"
-              renderer="webgl"
-              canvasAboveZoom={1}
-              minZoom={DATA_MIN_ZOOM}
-              minimapContainer={minimapEl}
-            />
-          ) : (
-            !error && <SpinnerFill />
+            {isEmpty ? null : minimapEl ? (
+              <GraphPane
+                key={graphKey}
+                ref={dataPaneRef}
+                restore={restoreView}
+                onRestored={() => setRestoreView(null)}
+                scribble={scribbling}
+                onScribbleDone={applyScribbles}
+                onNodeDoubleClick={onDataNodeDoubleClick}
+                data={scene}
+                instanceId="data"
+                renderer="webgl"
+                canvasAboveZoom={1}
+                minZoom={DATA_MIN_ZOOM}
+                minimapContainer={minimapEl}
+              />
+            ) : (
+              !error && <SpinnerFill />
+            )}
+          </div>
+
+          {/* Over the data graph while a query runs. It ignores the mouse, so the graph stays usable underneath. */}
+          {loadingKeys.size > 0 && (
+            <div className="loading-overlay" role="status" aria-live="polite">
+              <div className="loading-scrim" />
+              <Flex alignItems="center" gap="12" className="loading-content">
+                <LoadingSpinner size="large" />
+                <Typography variant="subheading-medium">
+                  Loading data
+                </Typography>
+              </Flex>
+            </div>
           )}
-        </div>
 
-        <div className="panel-actions">
-          <OutlinedButton
-            variant={scribbling ? "primary" : "neutral"}
-            size="medium"
-            isFloating
-            isDisabled={!scribbling && !canScribble}
-            leadingVisual={
-              scribbling ? <CheckIconOutline /> : <PencilIconOutline />
-            }
-            onClick={() => setScribbling((on) => !on)}
+          {scribbling && (
+            <div className="scribble-hint" role="status">
+              <Typography variant="subheading-small">Scribble mode</Typography>
+              <Typography
+                variant="body-small"
+                className="text-neutral-text-weak"
+              >
+                Draw with the mouse. Cross out a node or relationship to dismiss
+                it, draw a line from one node to another for the shortest path,
+                or circle some nodes and cross the circle to dismiss them all.
+                Right-drag pans, scroll zooms. S applies, Backspace undoes a
+                stroke, Esc cancels.
+              </Typography>
+            </div>
+          )}
+
+          {history.nowCard && (
+            <TimeMachine
+              snapshots={history.snapshots}
+              now={history.nowCard}
+              onRestore={restoreSnapshot}
+              onClose={history.close}
+            />
+          )}
+
+          {isEmpty && loadingKeys.size === 0 && !error && (
+            <div className="empty-hint">
+              <Typography
+                variant="body-large"
+                className="text-neutral-text-weak"
+              >
+                Click a label or relationship in the schema to show it here
+              </Typography>
+            </div>
+          )}
+
+          <Box padding="2" borderRadius="xl" className="panel panel-minimap">
+            <div ref={setMinimapEl} className="minimap-container" />
+          </Box>
+        </section>
+      </div>
+
+      <footer className="app-footer">
+        <Typography variant="body-small" className="text-neutral-text-weak">
+          Created with the{" "}
+          <TextLink type="external" href="https://neo4j.com/docs/nvl/current/">
+            Neo4j Visualization Library
+          </TextLink>{" "}
+          ·{" "}
+          <TextLink
+            type="external"
+            href="https://github.com/ckanz/NODES-2026-demo"
           >
-            {scribbling ? "Done (S)" : "Scribble (S)"}
-          </OutlinedButton>
-          <OutlinedButton
-            variant="neutral"
-            size="medium"
-            isFloating
-            isDisabled={history.snapshots.length === 0 || scribbling}
-            leadingVisual={<ClockIconOutline />}
-            onClick={history.open}
-          >
-            {`History (${history.snapshots.length})`}
-          </OutlinedButton>
-          <OutlinedButton
-            variant="neutral"
-            size="medium"
-            isFloating
-            isDisabled={isEmpty && loadingKeys.size === 0}
-            leadingVisual={<TrashIconOutline />}
-            onClick={clearAll}
-          >
-            Clear
-          </OutlinedButton>
-        </div>
-
-        {/* Over the data graph while a query runs. It ignores the mouse, so the graph stays usable underneath. */}
-        {loadingKeys.size > 0 && (
-          <div className="loading-overlay" role="status" aria-live="polite">
-            <div className="loading-scrim" />
-            <Flex alignItems="center" gap="12" className="loading-content">
-              <LoadingSpinner size="large" />
-              <Typography variant="subheading-medium">Loading data</Typography>
-            </Flex>
-          </div>
-        )}
-
-        {scribbling && (
-          <div className="scribble-hint" role="status">
-            <Typography variant="subheading-small">Scribble mode</Typography>
-            <Typography variant="body-small" className="text-neutral-text-weak">
-              Draw with the mouse. Cross out a node or relationship to dismiss
-              it, draw a line from one node to another for the shortest path, or
-              circle some nodes and cross the circle to dismiss them all.
-              Right-drag pans, scroll zooms. S applies, Backspace undoes a
-              stroke, Esc cancels.
-            </Typography>
-          </div>
-        )}
-
-        {history.nowCard && (
-          <TimeMachine
-            snapshots={history.snapshots}
-            now={history.nowCard}
-            onRestore={restoreSnapshot}
-            onClose={history.close}
-          />
-        )}
-
-        {isEmpty && loadingKeys.size === 0 && !error && (
-          <div className="empty-hint">
-            <Typography variant="body-large" className="text-neutral-text-weak">
-              Click a label or relationship in the schema to show it here
-            </Typography>
-          </div>
-        )}
-
-        <Box padding="16" borderRadius="xl" className="panel panel-title">
-          <Flex gap="4">
-            <Flex flexDirection="row" alignItems="center" gap="12">
-              <Typography variant="title-3">Data</Typography>
-              {(loadingKeys.size > 0 || syncingConnections > 0) && (
-                <LoadingSpinner size="small" />
-              )}
-            </Flex>
-            <Typography
-              variant="body-medium"
-              className="text-neutral-text-weak"
-            >
-              {formatGraphSummary(
-                scene.nodes.length,
-                scene.relationships.length,
-              )}
-            </Typography>
-          </Flex>
-        </Box>
-
-        <Box padding="2" borderRadius="xl" className="panel panel-minimap">
-          <div ref={setMinimapEl} className="minimap-container" />
-        </Box>
-      </section>
+            Source on GitHub
+          </TextLink>
+        </Typography>
+      </footer>
 
       {error && (
         <div className="panel-error">

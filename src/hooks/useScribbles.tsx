@@ -95,7 +95,7 @@ type UseScribblesOptions = {
 /**
  * Scribble mode for one GraphPane: collects strokes while `active`, draws them (and graph paper behind the graph)
  * so they follow pan and zoom, and when `active` goes off, works out what they asked for and reports it.
- * Strokes that did something are removed; the rest stay on screen.
+ * The drawing is always cleared when the mode ends; strokes that meant nothing are reported in the console.
  */
 export const useScribbles = ({
   nvlRef,
@@ -205,8 +205,8 @@ export const useScribbles = ({
     };
   }, [active, nvlReady, enabled, nvlRef]);
 
-  // Leaving scribble mode: read what was drawn. Strokes that asked for something are used up and removed;
-  // the others (a circle waiting to be crossed, say) stay where they are.
+  // Leaving scribble mode: read what was drawn, act on it, and clear the drawing. Strokes that could not be
+  // interpreted are reported in the console, so it is clear why nothing happened for them.
   const wasActive = useRef(false);
   useEffect(() => {
     const was = wasActive.current;
@@ -214,8 +214,10 @@ export const useScribbles = ({
     if (!was || active) return;
 
     currentStroke.current = null; // a stroke still being drawn when the mode ended
+    const drawn = strokes.current;
+    setStrokes([]);
     const nvl = nvlRef.current;
-    if (!nvl || strokes.current.length === 0) return;
+    if (!nvl || drawn.length === 0) return;
 
     const { nodes, relationships } = dataRef.current;
     const sizes = new Map(
@@ -231,15 +233,20 @@ export const useScribbles = ({
         radius: sizes.get(id) ?? DEFAULT_NODE_SIZE,
       }));
     const result = analyseScribbles(
-      strokes.current,
+      drawn,
       sceneNodes,
       relationships.map(({ id, from, to }) => ({ id, from, to })),
     );
-    if (result.consumed.length === 0) return;
 
-    const used = new Set(result.consumed);
-    setStrokes(strokes.current.filter((_, index) => !used.has(index)));
-    onDoneRef.current?.(result);
+    const ignored = drawn.length - result.consumed.length;
+    if (ignored > 0) {
+      console.info(
+        `Scribble: ${ignored} of ${drawn.length} stroke${drawn.length === 1 ? "" : "s"} could not be interpreted and ` +
+          "were ignored. Cross out a node or relationship to dismiss it, draw from one node to another for the " +
+          "shortest path, or circle nodes and cross the circle to dismiss them.",
+      );
+    }
+    if (result.consumed.length > 0) onDoneRef.current?.(result);
   }, [active, nvlRef, dataRef]);
 
   return {

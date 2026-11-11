@@ -10,15 +10,40 @@ import type { SceneState } from "./snapshots";
 export type Scene = DataGraph & { nodeById: Map<string, Node> };
 
 /**
- * Everything selected, de-duplicated (a node reached by two selections is drawn once), minus what the user took
- * away: hidden labels, and nodes and relationships dismissed one by one. Then any relationship that lost an end.
+ * Labels whose slice the user set with the ring, with the nodes in that slice. Such a slice replaces, rather than
+ * adds to, the label's nodes: other nodes of the label are not drawn, unless `keep` holds them (nodes the user
+ * asked for one by one, through an expansion or a path).
  */
-export const buildScene = ({
-  items,
-  hiddenLabels,
-  hiddenNodes,
-  hiddenRelationships,
-}: Omit<SceneState, "slices">): Scene => {
+export type SliceRestriction = {
+  slicedLabels: Map<string, Set<string>>;
+  keep: Set<string>;
+};
+
+/** Whether a node is outside every set slice of its labels (and so not drawn). Unsliced labels never exclude. */
+const outsideSlices = (
+  id: string,
+  labels: string[],
+  { slicedLabels, keep }: SliceRestriction,
+) => {
+  if (keep.has(id)) return false;
+  const slices = labels.flatMap((label) => slicedLabels.get(label) ?? []);
+  return slices.length > 0 && !slices.some((slice) => slice.has(id));
+};
+
+/**
+ * Everything selected, de-duplicated (a node reached by two selections is drawn once), minus what the user took
+ * away: hidden labels, nodes and relationships dismissed one by one, and nodes outside a slice set with the ring.
+ * Then any relationship that lost an end.
+ */
+export const buildScene = (
+  {
+    items,
+    hiddenLabels,
+    hiddenNodes,
+    hiddenRelationships,
+  }: Omit<SceneState, "slices">,
+  restriction?: SliceRestriction,
+): Scene => {
   const merged = mergeGraphs([...items.values()].map((item) => item.data));
   const nodeInfo = new Map(merged.nodeInfo);
   const nodeById = new Map(merged.nodes.map((node) => [node.id, node]));
@@ -26,7 +51,8 @@ export const buildScene = ({
   for (const [id, info] of nodeInfo) {
     if (
       hiddenNodes.has(id) ||
-      info.labels.some((label) => hiddenLabels.has(label))
+      info.labels.some((label) => hiddenLabels.has(label)) ||
+      (restriction && outsideSlices(id, info.labels, restriction))
     ) {
       nodeById.delete(id);
       nodeInfo.delete(id);

@@ -2,9 +2,56 @@
   position: fixed;
   inset: 0;
   display: flex;
+  flex-direction: column;
   overflow: hidden;
   background: var(--theme-color-neutral-bg-default);
   color: var(--theme-color-neutral-text-default);
+}
+
+/* One header across the top, split in the same two halves as the panes below it */
+.app-header {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: none;
+  background: var(--theme-color-neutral-bg-weak);
+  border-bottom: 1px solid var(--theme-color-neutral-border-weak);
+}
+
+.app-header-half {
+  display: flex;
+  height: 48px;
+  box-sizing: border-box;
+  overflow: hidden;
+  white-space: nowrap;
+  align-items: center;
+  gap: var(--space-12);
+  min-width: 0;
+  padding: 0 var(--space-16);
+}
+
+.app-header-data {
+  border-left: 1px solid var(--theme-color-neutral-border-weak);
+}
+
+.app-header-actions {
+  display: flex;
+  gap: var(--space-8);
+  margin-left: auto;
+}
+
+.app-footer {
+  flex: none;
+  padding: var(--space-8) var(--space-16);
+  text-align: center;
+  background: var(--theme-color-neutral-bg-weak);
+  border-top: 1px solid var(--theme-color-neutral-border-weak);
+}
+
+.app-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
 /* Two equal halves: schema on the left, data on the right */
@@ -43,22 +90,6 @@
 .panel-title {
   top: var(--space-16);
   left: var(--space-16);
-}
-
-/* Leave room for the Clear button; long status text wraps instead of running under it */
-.pane-right .panel-title {
-  max-width: calc(100% - 2 * var(--space-16) - 120px);
-  box-sizing: border-box;
-}
-
-/* Top-right actions on the data pane, above the loading overlay */
-.panel-actions {
-  display: flex;
-  gap: var(--space-8);
-  position: absolute;
-  z-index: 2;
-  top: var(--space-16);
-  right: var(--space-16);
 }
 
 .panel-error {
@@ -203,7 +234,7 @@
   font-weight: 500;
 }
 
-/* Loading state over the data graph. Panels (z-index 1) and the minimap stay above it. */
+/* Loading state over the data graph. The minimap (z-index 1) stays above it. */
 .loading-overlay {
   position: absolute;
   inset: 0;

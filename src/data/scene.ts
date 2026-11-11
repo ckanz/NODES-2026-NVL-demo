@@ -59,9 +59,9 @@ export type SceneState = {
 };
 
 // Most nodes drawn at once. Beyond it, the most recently loaded nodes are left out.
-export const MAX_SCENE_NODES = 30_000;
+const MAX_SCENE_NODES = 30_000;
 
-export type Scene = DataGraph & {
+type Scene = DataGraph & {
   nodeById: Map<string, Node>;
   // Nodes left out because of MAX_SCENE_NODES.
   overCap: number;
@@ -71,7 +71,7 @@ export type Scene = DataGraph & {
  * Labels sliced with the ring, with their slice's nodes. Other nodes of those labels are not drawn unless `keep`
  * holds them (nodes from an expansion or a path).
  */
-export type SliceRestriction = {
+type SliceRestriction = {
   slicedLabels: Map<string, Set<string>>;
   keep: Set<string>;
 };
@@ -91,7 +91,7 @@ const outsideSlices = (
  * Everything selected, minus hidden labels, dismissed nodes and relationships, nodes outside a ring slice, and
  * relationships that lost an end.
  */
-export const buildScene = (
+const buildScene = (
   {
     items,
     hiddenLabels,
@@ -155,11 +155,7 @@ export const isFullyVisible = (data: DataGraph, scene: Scene): boolean => {
   );
 };
 
-export const countVisible = (
-  data: DataGraph,
-  scene: Scene,
-  label: string,
-): number => {
+const countVisible = (data: DataGraph, scene: Scene, label: string): number => {
   let count = 0;
   for (const [id, info] of data.nodeInfo)
     if (info.labels.includes(label) && scene.nodeById.has(id)) count += 1;
@@ -167,7 +163,7 @@ export const countVisible = (
 };
 
 // Ids are sorted, so requests compare cheaply.
-export type ConnectionRequest = {
+type ConnectionRequest = {
   pattern: Pattern;
   fromIds: string[];
   toIds: string[];
@@ -234,13 +230,13 @@ export const countScene = ({ nodeInfo, relationships }: Scene) => {
 // ---- Scene state helpers ----------------------------------------------------------------------------------
 
 // Keys of loaded selections and their loading state.
-export const LABEL_KEY_PREFIX = "node:";
+const LABEL_KEY_PREFIX = "node:";
 export const labelKey = (label: string) => `${LABEL_KEY_PREFIX}${label}`;
 export const relationshipKey = (pattern: Pattern) =>
   `rel:${patternKey(pattern)}`;
 
 // Labels clicked in the schema, and the end labels of clicked patterns.
-export const selectedLabels = (items: ReadonlyMap<string, Item>) => {
+const selectedLabels = (items: ReadonlyMap<string, Item>) => {
   const labels = new Set<string>();
   for (const key of items.keys()) {
     if (key.startsWith(LABEL_KEY_PREFIX))
@@ -257,7 +253,7 @@ export const connectionKey = (pattern: Pattern) =>
   `conn:${patternKey(pattern)}`;
 
 // A ring slice replaces the label's nodes instead of adding to them; nodes requested one by one are kept.
-export const sliceRestriction = (
+const sliceRestriction = (
   items: ReadonlyMap<string, Item>,
   slices: ReadonlyMap<string, Slice>,
 ): SliceRestriction => {

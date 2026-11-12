@@ -1,34 +1,34 @@
-import type { NVL } from "@neo4j-nvl/base";
+import type { NVL, Point } from "@neo4j-nvl/base";
 
-import { clientToGraph } from "./viewport";
-import type { Point } from "./viewport";
+// NVL's pan is the graph point at the container's centre; one graph unit is zoom / devicePixelRatio CSS px.
+export const clientToGraph = (nvl: NVL, client: Point): Point => {
+  const rect = nvl.getContainer().getBoundingClientRect();
+  const scale = nvl.getScale() / window.devicePixelRatio;
+  const pan = nvl.getPan();
+  return {
+    x: pan.x + (client.x - rect.left - rect.width / 2) / scale,
+    y: pan.y + (client.y - rect.top - rect.height / 2) / scale,
+  };
+};
 
 export type ScribbleOptions = {
-  /** Asked on every event: is scribble mode on? When it is off this handler does nothing at all. */
   isActive: () => boolean;
-  /** A stroke began. Points are in graph coordinates, so a stroke stays put when the view zooms or pans. */
+  // Points are in graph coordinates, so strokes stay put when the view zooms or pans.
   onStrokeStart: (point: Point) => void;
   onStrokePoint: (point: Point) => void;
   onStrokeEnd: () => void;
 };
 
-// Points closer together than this (in screen pixels) add nothing but weight.
+// Closer points add nothing but weight.
 const MIN_POINT_DISTANCE_PX = 3;
 
 /**
- * Lets the user draw on top of the graph, with the left mouse button, while scribble mode is on.
- *
- * It listens one level above the NVL container, in the capture phase, so it sees every press before NVL's own
- * handlers. (On the container itself it would not be enough: NVL also listens there in the capture phase, and
- * listeners on the same element run in the order they were added, which would put NVL's first.)
- * While scribbling it takes the left button for itself: nodes cannot be dragged, clicked or double-clicked.
- * The other buttons and the wheel are left alone, so panning (right or middle drag, see InertialPanInteraction)
- * and zooming keep working.
+ * Drawing with the left mouse button while scribble mode is on. Listens on the container's parent in the capture
+ * phase, so it runs before NVL's own handlers. Other buttons and the wheel still pan and zoom.
  */
 export class ScribbleInteraction {
   private readonly nvl: NVL;
   private readonly container: HTMLElement;
-  /** Where we listen: the container's parent, so we always run before listeners on the container. */
   private readonly outer: HTMLElement;
   private readonly options: ScribbleOptions;
 
@@ -68,7 +68,6 @@ export class ScribbleInteraction {
 
   private onPointerDown = (event: PointerEvent): void => {
     if (!this.options.isActive() || this.pointerId !== null) return;
-    // Only the left button draws. The others fall through to panning.
     if (event.pointerType === "mouse" && event.button !== 0) return;
 
     this.swallow(event);
@@ -103,12 +102,12 @@ export class ScribbleInteraction {
     this.options.onStrokeEnd();
   };
 
-  /** NVL starts dragging a node on mousedown and selects on click. While scribbling, neither may happen. */
+  // Stops NVL's node dragging (mousedown) and selection (click) while scribbling.
   private blockLeftButton = (event: MouseEvent): void => {
     if (this.options.isActive() && event.button === 0) this.swallow(event);
   };
 
-  /** The right button pans while scribbling, so it must not also open the browser's menu. */
+  // The right button pans while scribbling, so suppress the browser menu.
   private onContextMenu = (event: MouseEvent): void => {
     if (this.options.isActive()) this.swallow(event);
   };

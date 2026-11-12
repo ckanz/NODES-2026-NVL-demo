@@ -1,6 +1,6 @@
 export const formatCount = (value: number) => value.toLocaleString("en-US");
 
-/** Share of the whole that is on screen, 0 to 1. */
+// 0 to 1.
 export const fractionOf = (inScene: number, total: number) =>
   total > 0 ? Math.min(1, inScene / total) : 0;
 
@@ -11,7 +11,7 @@ export const formatPercent = (fraction: number): string => {
   return `${percent >= 10 ? Math.round(percent) : percent.toFixed(1)}%`;
 };
 
-/** The data pane's status line. Shared by the live pane and the history cards, so both read the same. */
+// Shared by the live pane and the history cards, so both read the same.
 export const formatGraphSummary = (
   nodes: number,
   relationships: number,

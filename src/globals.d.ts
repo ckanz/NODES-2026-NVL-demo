@@ -1,6 +1,6 @@
 declare module "*.css";
 
-/** Connection settings injected at build time by webpack's EnvironmentPlugin (see webpack.config.js). */
+// Injected at build time by webpack's EnvironmentPlugin.
 declare namespace NodeJS {
   interface ProcessEnv {
     NEO4J_URI?: string;

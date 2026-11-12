@@ -1,11 +1,11 @@
 import HtmlWebpackPlugin from "html-webpack-plugin";
 import webpack from "webpack";
 
-// Neo4j connection settings may live in a git-ignored .env file. Variables set in the shell win.
+// Optional git-ignored .env file. Variables set in the shell win.
 try {
   process.loadEnvFile();
 } catch {
-  // No .env: the shell environment, or the development defaults in src/data/neo4j.ts, are used.
+  // No .env: use the shell environment or the defaults in src/data/neo4j.ts.
 }
 
 export default {

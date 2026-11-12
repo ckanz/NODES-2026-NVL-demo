@@ -28,10 +28,10 @@ Without a `.env`, the app connects to `bolt://localhost:7687` as `neo4j` / `pass
   - Click a **relationship** to add that pattern to the scene (1k record query limit).
   - Drag and expand the arc **ring** around a selected label to choose which "slice" of its nodes is loaded.
 - **Data (right):**
-  - **Scribble mode** (`S`): cross out nodes or relationships to dismiss them, or draw a line between two nodes
-    to load the shortest path. `S` applies, `Backspace` undoes a stroke, `Escape` cancels.
+  - **Scribble mode**: cross out nodes or relationships to dismiss them, or draw a line between two nodes
+    to load the shortest path. Click **Done** to apply.
   - **History** shows a snapshot of every change; pick one to go back to it.
   - **Clear** empties the scene.
   - Double-click a node to show its neighbours; double-click again to collapse them.
- 
+
 ![img](https://github.com/ckanz/NODES-2026-demo/blob/main/Screenshot.png?raw=true)

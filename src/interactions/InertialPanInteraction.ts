@@ -1,45 +1,28 @@
 import type { NVL } from "@neo4j-nvl/base";
 
-import { cssPixelsPerUnit } from "./viewport";
-
 export type InertialPanOptions = {
-  /**
-   * Time constant of the slow-down in milliseconds. After release the speed decays as
-   * `exp(-t / friction)`, so a larger value glides longer. The scene coasts about
-   * `speed * friction` further, e.g. 0.75 px/ms * 150 ms = ~110 px. Default 150, a short, gentle glide.
-   */
+  // Slow-down time constant in ms: speed decays as exp(-t / friction). Default 150.
   friction?: number;
-  /** Stop gliding below this speed, in CSS px per millisecond. Default 0.02. */
+  // Stop gliding below this speed, in CSS px/ms. Default 0.02.
   minSpeed?: number;
-  /** Upper bound for the release speed, in CSS px per millisecond, which also caps the glide distance. Default 1.5. */
+  // Cap on the release speed, in CSS px/ms. Default 1.5.
   maxSpeed?: number;
-  /**
-   * Do not start a pan when the pointer goes down on a node, so node dragging keeps working. Default true.
-   * Can be a function, asked on every press, for when node dragging is switched on and off.
-   */
+  // Don't pan when pressing on a node, so node dragging works. Default true.
   excludeNodes?: boolean | (() => boolean);
-  /**
-   * Whether a press with any button may pan, not just the left one. Asked on every press. Scribble mode uses
-   * the left button to draw, so there the others pan. Default: left button only.
-   */
+  // Let any mouse button pan, not just the left one. Asked on every press.
   anyButton?: () => boolean;
 };
 
 type Sample = { x: number; y: number; t: number };
 
-// A release more than this long after the last movement counts as "held still": no glide.
+// Releasing this long after the last move means "held still": no glide.
 const STALE_SAMPLE_MS = 80;
-// A drag that moved further than this is a pan, not a click.
+// Moving further than this is a pan, not a click.
 const CLICK_SLOP_PX = 4;
-// How long after a pan release a click event is still treated as part of that drag.
 const CLICK_SUPPRESS_MS = 100;
-// Only the most recent movement decides the release velocity.
 const VELOCITY_WINDOW_MS = 100;
 
-/**
- * Pans the scene by dragging the background, and keeps gliding with a gradual slow-down
- * after the pointer is released. Replaces NVL's built-in `PanInteraction`.
- */
+// Drag-to-pan with a glide after release. Replaces NVL's built-in PanInteraction.
 export class InertialPanInteraction {
   private readonly nvl: NVL;
   private readonly container: HTMLElement;
@@ -57,12 +40,8 @@ export class InertialPanInteraction {
   private samples: Sample[] = [];
   private frame: number | null = null;
   private velocity = { x: 0, y: 0 };
-  /**
-   * The pan this gesture (drag and the glide after it) has asked for, and the zoom it was taken at. NVL's
-   * setPan only stores a pending value that the next render applies, and getPan returns the old one until
-   * then. Several pointer moves can arrive between two renders, so adding each move to getPan() would lose
-   * all but the last of them and the scene would trail the mouse. So the pan is kept here instead.
-   */
+  // Our own pan for the current gesture. NVL's setPan only applies on the next render and getPan returns the
+  // old value until then, so building on getPan() would lose pointer moves between renders.
   private pan: { x: number; y: number; scale: number } | null = null;
   private previousCursor = "";
   private previousUserSelect = "";
@@ -83,9 +62,8 @@ export class InertialPanInteraction {
     this.container.addEventListener("pointermove", this.onPointerMove);
     this.container.addEventListener("pointerup", this.onPointerUp);
     this.container.addEventListener("pointercancel", this.onPointerUp);
-    // Capture phase, so we can swallow the click that follows a pan before NVL's click handler sees it.
+    // Capture phase, to swallow the click after a pan before NVL sees it.
     this.container.addEventListener("click", this.onClick, true);
-    // A new wheel gesture takes over from any glide in progress.
     this.container.addEventListener("wheel", this.stopGlide, { passive: true });
   }
 
@@ -166,7 +144,7 @@ export class InertialPanInteraction {
       return;
     }
     this.velocity = velocity;
-    this.startGlide(); // carries on from this.pan
+    this.startGlide();
   };
 
   private endDrag(): void {
@@ -192,7 +170,6 @@ export class InertialPanInteraction {
     event.stopPropagation();
   };
 
-  /** CSS px per ms over the last moments of the drag, clamped to maxSpeed. */
   private releaseVelocity(releaseTime: number): { x: number; y: number } {
     const { samples } = this;
     if (samples.length < 2) return { x: 0, y: 0 };
@@ -216,7 +193,7 @@ export class InertialPanInteraction {
     const step = (now: number): void => {
       const dt = Math.min(now - previous, 50);
       previous = now;
-      // Exact integral of v0 * exp(-t / friction) over dt, so the glide does not depend on frame rate.
+      // Exact integral over dt, so the glide doesn't depend on frame rate.
       const decay = Math.exp(-dt / this.friction);
       const travel = this.friction * (1 - decay);
       this.panByScreenDelta(this.velocity.x * travel, this.velocity.y * travel);
@@ -239,20 +216,19 @@ export class InertialPanInteraction {
     if (this.frame !== null) cancelAnimationFrame(this.frame);
     this.frame = null;
     this.velocity = { x: 0, y: 0 };
-    // A press during a glide keeps this.pan: its last steps may not be drawn yet, so getPan() would be behind.
+    // A press during a glide keeps this.pan: getPan() may still lag behind.
     if (this.pointerId === null) this.pan = null;
   };
 
-  /** Moves the scene by a number of CSS pixels: the pan, being the graph point at the centre, moves the other way. */
+  // Pan is the graph point at the centre, so it moves opposite to the scene.
   private panByScreenDelta(dx: number, dy: number): void {
     const scale = this.nvl.getScale();
-    // Start from NVL's pan at the beginning of a gesture, and again if something zoomed in the meantime
-    // (zooming moves the pan too). Otherwise build on our own value; see `pan`.
+    // Resync from NVL at gesture start or after a zoom (zooming moves the pan too).
     if (this.pan === null || this.pan.scale !== scale) {
       const current = this.nvl.getPan();
       this.pan = { x: current.x, y: current.y, scale };
     }
-    const perUnit = cssPixelsPerUnit(scale);
+    const perUnit = scale / window.devicePixelRatio; // CSS pixels per graph unit
     this.pan.x -= dx / perUnit;
     this.pan.y -= dy / perUnit;
     this.nvl.setPan(this.pan.x, this.pan.y);

@@ -1,4 +1,6 @@
-import type { NVL } from "@neo4j-nvl/base";
+import type { NVL, Point } from "@neo4j-nvl/base";
+
+import { clientToGraph } from "./ScribbleInteraction";
 
 // Caps a single wheel step, so a fast trackpad flick can't jump the zoom.
 const MAX_DELTA = 200;
@@ -26,8 +28,8 @@ export class SmoothZoomInteraction {
   private readonly onZoom?: (zoom: number) => void;
 
   private targetZoom: number | null = null;
-  // Pointer position in CSS px relative to the container; stays fixed while zooming.
-  private anchor = { x: 0, y: 0 };
+  // Pointer position (clientX/Y); the graph point under it stays fixed while zooming.
+  private anchor: Point = { x: 0, y: 0 };
   private frame: number | null = null;
 
   constructor(nvl: NVL, options: SmoothZoomOptions = {}) {
@@ -57,8 +59,7 @@ export class SmoothZoomInteraction {
       : this.wheelSensitivity;
     const delta = Math.max(-MAX_DELTA, Math.min(MAX_DELTA, event.deltaY));
 
-    const rect = this.container.getBoundingClientRect();
-    this.anchor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    this.anchor = { x: event.clientX, y: event.clientY };
 
     const { minZoom, maxZoom } = this.nvl.getZoomLimits();
     const base = this.targetZoom ?? this.nvl.getScale();
@@ -98,19 +99,14 @@ export class SmoothZoomInteraction {
 
   // Adjusts the pan so the graph point under the anchor stays under it.
   private zoomTo(newZoom: number): void {
-    const oldPerUnit = this.nvl.getScale() / window.devicePixelRatio;
-    const newPerUnit = newZoom / window.devicePixelRatio;
+    const point = clientToGraph(this.nvl, this.anchor);
     const pan = this.nvl.getPan();
-    const { width, height } = this.container.getBoundingClientRect();
-    const offsetX = this.anchor.x - width / 2;
-    const offsetY = this.anchor.y - height / 2;
-
-    const pointX = pan.x + offsetX / oldPerUnit;
-    const pointY = pan.y + offsetY / oldPerUnit;
+    // Scale the pan's distance to that point, so the point stays under the pointer.
+    const ratio = this.nvl.getScale() / newZoom;
     this.nvl.setZoomAndPan(
       newZoom,
-      pointX - offsetX / newPerUnit,
-      pointY - offsetY / newPerUnit,
+      point.x - (point.x - pan.x) * ratio,
+      point.y - (point.y - pan.y) * ratio,
     );
     this.onZoom?.(newZoom);
   }

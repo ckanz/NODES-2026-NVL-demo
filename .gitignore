@@ -2,8 +2,9 @@ node_modules
 dist
 coverage
 
-# Agent skills are links into node_modules (see skills-lock.json), so they come from the installed packages.
+# Agent skills: links into node_modules, recreated by `npm install` from skills-lock.json.
 .agents
+.claude
 
 # Local settings, possibly with credentials (NEO4J_* for the build)
 .env

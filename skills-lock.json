@@ -12,8 +12,8 @@
       "source": "@neo4j-nvl/base",
       "sourceType": "node_modules",
       "skillPath": "skills/neo4j-nvl-skill/SKILL.md",
-      "version": "2.0.0-3b74980d",
-      "computedHash": "93b6246a51e1c75fc9c82a1fe9eeb4a69cd3ef58f77914daac9283039a085d22"
+      "version": "2.1.0",
+      "computedHash": "374157a3d12dea237091d3c257e58016f4a0a7f9d83ce0bcd5cbd2b196897b24"
     }
   }
 }

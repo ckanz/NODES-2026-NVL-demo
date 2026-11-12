@@ -106,21 +106,13 @@ export const App = () => {
   const [graphKey, setGraphKey] = useState(0);
   const dataPaneRef = useRef<GraphPaneHandle>(null);
 
+  const sceneState = useMemo<SceneState>(
+    () => ({ items, hiddenLabels, hiddenNodes, hiddenRelationships, slices }),
+    [items, hiddenLabels, hiddenNodes, hiddenRelationships, slices],
+  );
   // Refs so event handlers don't read stale state.
-  const sceneStateRef = useRef<SceneState>({
-    items,
-    hiddenLabels,
-    hiddenNodes,
-    hiddenRelationships,
-    slices,
-  });
-  sceneStateRef.current = {
-    items,
-    hiddenLabels,
-    hiddenNodes,
-    hiddenRelationships,
-    slices,
-  };
+  const sceneStateRef = useRef(sceneState);
+  sceneStateRef.current = sceneState;
   const loadingRef = useRef(loadingKeys);
   loadingRef.current = loadingKeys;
   const schemaRef = useRef(schema);
@@ -132,27 +124,17 @@ export const App = () => {
     [],
   );
   const removeItem = useCallback(
-    (key: string) =>
+    (...keys: string[]) =>
       setItems((current) => {
         const next = new Map(current);
-        next.delete(key);
+        for (const key of keys) next.delete(key);
         return next;
       }),
     [],
   );
 
   // ---- The data graph --------------------------------------------------------------------------------------
-  const scene = useMemo(
-    () =>
-      sceneFor({
-        items,
-        hiddenLabels,
-        hiddenNodes,
-        hiddenRelationships,
-        slices,
-      }),
-    [items, hiddenLabels, hiddenNodes, hiddenRelationships, slices],
-  );
+  const scene = useMemo(() => sceneFor(sceneState), [sceneState]);
   const sceneRef = useRef(scene);
   sceneRef.current = scene;
   const sceneCounts = useMemo(() => countScene(scene), [scene]);
@@ -162,6 +144,9 @@ export const App = () => {
   );
   const sceneCountsRef = useRef(sceneCounts);
   sceneCountsRef.current = sceneCounts;
+  // Nodes of a label on screen right now.
+  const onScreen = (label: string) =>
+    sceneCountsRef.current.labels.get(label) ?? 0;
   const countsRef = useRef({ nodes: 0, relationships: 0 });
   countsRef.current = {
     nodes: scene.nodes.length,
@@ -200,6 +185,11 @@ export const App = () => {
 
   // Bumped by Clear and restore, so queries started earlier drop their results.
   const generation = useRef(0);
+  // Call when a query starts; the returned check is false once Clear or restore happened since.
+  const startedNow = () => {
+    const started = generation.current;
+    return () => started === generation.current;
+  };
 
   // The user asked for this data, so anything in it they had hidden comes back.
   const revealAll = useCallback(
@@ -226,21 +216,16 @@ export const App = () => {
     (loadingKey: string, next: SceneState, apply: () => void) => {
       const currentSchema = schemaRef.current;
       if (!currentSchema) return;
-      const started = generation.current;
+      const stillCurrent = startedNow();
       setLoading(loadingKey, true);
       fetchMissingConnections(next, currentSchema)
         .then((connections) => {
-          if (started !== generation.current) return;
+          if (!stillCurrent()) return;
           apply();
           setItems((current) => withConnections(current, connections));
         })
-        .catch(
-          (e: unknown) =>
-            started === generation.current && setError(errorMessage(e)),
-        )
-        .finally(
-          () => started === generation.current && setLoading(loadingKey, false),
-        );
+        .catch((e: unknown) => stillCurrent() && setError(errorMessage(e)))
+        .finally(() => stillCurrent() && setLoading(loadingKey, false));
     },
     [setLoading],
   );
@@ -262,8 +247,7 @@ export const App = () => {
         sceneStateRef.current.items.has(key)
       )
         return;
-      const started = generation.current;
-      const stillCurrent = () => started === generation.current;
+      const stillCurrent = startedNow();
       setError(null);
       setLoading(key, true);
       load()
@@ -320,7 +304,7 @@ export const App = () => {
       if (
         sceneStateRef.current.hiddenLabels.has(label) &&
         (sceneStateRef.current.items.has(labelKey(label)) ||
-          (sceneCountsRef.current.labels.get(label) ?? 0) > 0)
+          onScreen(label) > 0)
       ) {
         const state = sceneStateRef.current;
         showWithConnections(
@@ -333,7 +317,7 @@ export const App = () => {
         );
         return;
       }
-      if ((sceneCountsRef.current.labels.get(label) ?? 0) > 0) {
+      if (onScreen(label) > 0) {
         record(`Remove (:${label})`);
         setHiddenLabels((current) => withKey(current, label, true));
         return;
@@ -378,12 +362,7 @@ export const App = () => {
           });
         } else {
           record(`Remove ${loaded.title}`);
-          setItems((current) => {
-            const next = new Map(current);
-            next.delete(key);
-            next.delete(connectionKey(pattern));
-            return next;
-          });
+          removeItem(key, connectionKey(pattern));
         }
         return;
       }
@@ -394,45 +373,25 @@ export const App = () => {
         [pattern.fromLabel, pattern.toLabel],
       );
     },
-    [schema, addItem, record, revealAll, showWithConnections],
+    [schema, addItem, record, removeItem, revealAll, showWithConnections],
   );
 
   // Changes that add nodes fetch their relationships first (see addItem). This only catches two loads that
   // overlapped, where neither could know about the other's nodes. Normally it finds nothing missing.
   useEffect(() => {
     if (!schema) return;
-    const state = {
-      items,
-      hiddenLabels,
-      hiddenNodes,
-      hiddenRelationships,
-      slices,
-    };
-    const started = generation.current;
+    const stillCurrent = startedNow();
     let cancelled = false;
-    fetchMissingConnections(state, schema, scene)
+    fetchMissingConnections(sceneState, schema, scene)
       .then((connections) => {
-        if (
-          cancelled ||
-          started !== generation.current ||
-          connections.length === 0
-        )
-          return;
+        if (cancelled || !stillCurrent() || connections.length === 0) return;
         setItems((current) => withConnections(current, connections));
       })
       .catch((e: unknown) => !cancelled && setError(errorMessage(e)));
     return () => {
       cancelled = true;
     };
-  }, [
-    schema,
-    items,
-    hiddenLabels,
-    hiddenNodes,
-    hiddenRelationships,
-    slices,
-    scene,
-  ]);
+  }, [schema, sceneState, scene]);
 
   // Only the latest slice request per label may land, so a slow one cannot overwrite a newer one.
   const sliceRequests = useRef(new Map<string, number>());
@@ -450,10 +409,9 @@ export const App = () => {
 
       const request = (sliceRequests.current.get(key) ?? 0) + 1;
       sliceRequests.current.set(key, request);
-      const started = generation.current;
+      const stillCurrent = startedNow();
       const isLatest = () =>
-        sliceRequests.current.get(key) === request &&
-        started === generation.current;
+        sliceRequests.current.get(key) === request && stillCurrent();
 
       const visiblePatterns = [...schema.relationshipById.values()].filter(
         (pattern) =>
@@ -606,8 +564,7 @@ export const App = () => {
   const schemaView = useMemo<GraphData | null>(() => {
     if (!schema) return null;
     const isLabelOn = (label: string) =>
-      (sceneCounts.labels.get(label) ?? 0) > 0 ||
-      loadingKeys.has(labelKey(label));
+      onScreen(label) > 0 || loadingKeys.has(labelKey(label));
     return {
       nodes: schema.nodes.map((node) => ({
         ...node,
@@ -638,10 +595,7 @@ export const App = () => {
       return slices.get(label) ?? defaultSlice(connected);
     return {
       skip: 0,
-      count: Math.min(
-        Math.max(sceneCounts.labels.get(label) ?? 0, 1),
-        connected,
-      ),
+      count: Math.min(Math.max(onScreen(label), 1), connected),
     };
   };
 
@@ -731,11 +685,11 @@ export const App = () => {
               return createPortal(
                 <StatOverlay
                   title={label}
-                  inScene={sceneCounts.labels.get(label) ?? 0}
+                  inScene={onScreen(label)}
                   total={schema.totals.labels.get(label) ?? 0}
                   sliceTotal={connected}
                   nodeSize={SCHEMA_NODE_SIZE}
-                  selected={(sceneCounts.labels.get(label) ?? 0) > 0}
+                  selected={onScreen(label) > 0}
                   slice={ringSliceFor(label)}
                   visibleInSlice={slicesOnScreen.get(label)}
                   maxCount={Math.min(connected, MAX_SLICE)}
